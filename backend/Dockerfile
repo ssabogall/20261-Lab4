@@ -1,4 +1,3 @@
-# Usa una imagen ligera y mantenida
 FROM node:20-alpine AS base
 
 # Create app directory
