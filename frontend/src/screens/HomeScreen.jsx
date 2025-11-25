@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
 import { Col, Row } from 'react-bootstrap';
 import HomeCarousel from '../components/Carousel';
 import Book from '../components/Book';
+import { api } from '../lib/api';
+
 
 const HomeScreen = () => {
   const [books, setBooks] = useState([]);
@@ -10,7 +11,7 @@ const HomeScreen = () => {
   useEffect(() => {
     const fetchBooks = async () => {
       try {
-        const { data } = await axios.get('/api/books/');
+        const { data } = await api.get('/api/books/');
         setBooks(data);
       } catch (error) {
         console.error("Error loading books:", error);

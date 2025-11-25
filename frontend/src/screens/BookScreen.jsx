@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import { api } from '../lib/api';
 
 import { Link, useParams } from 'react-router-dom';
 import { Row, Col, Image, ListGroup } from 'react-bootstrap';
@@ -13,7 +13,7 @@ const BookScreen = ({ match }) => {
 
     useEffect(() => {
         const fetchBook = async () => {
-            const { data } = await axios.get(`/api/books/${id}`)
+            const { data } = await api.get(`/api/books/${id}`)
             setBook(data)
         }
         fetchBook()
