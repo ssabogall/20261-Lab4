@@ -1,0 +1,67 @@
+# ============================================================
+# Frontend - Deployment + Service
+# React (Vite) servido con Nginx en puerto 80
+#
+# ANTES DE APLICAR:
+#   Reemplaza TU_ACCOUNT_ID con tu AWS Account ID real
+#   (ejecútalo con: sed -i "s/TU_ACCOUNT_ID/$AWS_ACCOUNT_ID/g" frontend-deployment.yaml)
+# ============================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: default
+  labels:
+    app: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: TU_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/bookstore/frontend:latest
+          ports:
+            - containerPort: 80
+          env:
+            - name: NGINX_PORT
+              value: "80"
+            - name: PROXY_PASS
+              value: "http://backend-service:5001"
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+  namespace: default
+  annotations:
+    # Estas anotaciones le dicen a AWS que cree el Load Balancer
+    # en las subnets públicas de tu VPC
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+    service.beta.kubernetes.io/aws-load-balancer-subnets: >-
+      subnet-00d5074287dfba932,subnet-0823668c6cdd8a324
+spec:
+  selector:
+    app: frontend
+  ports:
+    - port: 80
+      targetPort: 80
+      protocol: TCP
+  # LoadBalancer = crea un Classic Load Balancer en AWS
+  # automáticamente y te da una URL pública
+  type: LoadBalancer
