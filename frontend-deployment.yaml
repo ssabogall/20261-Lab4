@@ -14,6 +14,11 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: 061709796715.dkr.ecr.us-east-1.amazonaws.com/bookstore-frontend:latest
+          image: 261273955683.dkr.ecr.us-east-1.amazonaws.com/bookstore-frontend:latest
           ports:
             - containerPort: 80
+          env:
+            - name: NGINX_PORT
+              value: "80"
+            - name: PROXY_PASS
+              value: "http://backend-service:5001"

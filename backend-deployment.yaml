@@ -14,9 +14,11 @@ spec:
     spec:
       containers:
         - name: backend
-          image: 061709796715.dkr.ecr.us-east-1.amazonaws.com/bookstore-backend:latest
+          image: 261273955683.dkr.ecr.us-east-1.amazonaws.com/bookstore-backend:latest
           ports:
             - containerPort: 5001
-          envFrom:
-            - secretRef:
-                name: backend-secret
+          env:
+            - name: PORT
+              value: "5001"
+            - name: AWS_REGION
+              value: "us-east-1"
