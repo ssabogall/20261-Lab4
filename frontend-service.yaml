@@ -3,14 +3,13 @@ kind: Service
 metadata:
   name: frontend-service
   annotations:
-    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
-    service.beta.kubernetes.io/aws-load-balancer-subnets: subnet-073da8ca279ddbd1c,subnet-0596dcd39831bf21f
+    service.beta.kubernetes.io/aws-load-balancer-subnets: "subnet-0070a9a18c3a58153,subnet-0220ea6d8ef9a5159"
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
 spec:
   type: LoadBalancer
-  loadBalancerClass: eks.amazonaws.com/nlb
   selector:
     app: frontend
   ports:
-    - port: 80
-      targetPort: 80
-      protocol: TCP
+  - protocol: TCP
+    port: 80
+    targetPort: 80

@@ -22,3 +22,11 @@ spec:
               value: "5001"
             - name: AWS_REGION
               value: "us-east-1"
+            - name: NODE_ENV
+              value: "development"
+            - name: AWS_ACCESS_KEY_ID
+              value: "TU_ACCESS_KEY_ID"
+            - name: AWS_SECRET_ACCESS_KEY
+              value: "TU_SECRET_ACCESS_KEY"
+            - name: AWS_SESSION_TOKEN
+              value: "TU_SESSION_TOKEN"
