@@ -3,7 +3,7 @@ kind: Service
 metadata:
   name: frontend-service
   annotations:
-    service.beta.kubernetes.io/aws-load-balancer-subnets: "subnet-0070a9a18c3a58153,subnet-0220ea6d8ef9a5159"
+    service.beta.kubernetes.io/aws-load-balancer-subnets: "subnet-0af67e476b3179f72,subnet-0310fa9c063fe06e3"
     service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
 spec:
   type: LoadBalancer
