@@ -1,0 +1,72 @@
+services:
+
+  mongodb:
+    container_name: mybookstore-mongodb
+    image: mongo:7.0
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - bookstore-network
+
+  books-service:
+    container_name: mybookstore-books
+    build: ./backend
+    restart: always
+    ports:
+      - "5001:5001"
+    env_file:
+      - ./backend/.env
+    depends_on:
+      - mongodb
+    networks:
+      - bookstore-network
+
+  auth-service:
+    container_name: mybookstore-auth
+    build: ./services/auth-service
+    restart: always
+    ports:
+      - "5002:5002"
+    env_file:
+      - ./services/auth-service/.env
+    networks:
+      - bookstore-network
+
+  reviews-service:
+    container_name: mybookstore-reviews
+    build: ./services/reviews-service
+    restart: always
+    ports:
+      - "5003:5003"
+    env_file:
+      - ./services/reviews-service/.env
+    networks:
+      - bookstore-network
+
+  frontend:
+    container_name: mybookstore-frontend
+    build: ./frontend
+    restart: always
+    ports:
+      - "80:80"
+    environment:
+      - NGINX_PORT=80
+      - BOOKS_SERVICE_URL=http://books-service:5001
+      - AUTH_SERVICE_URL=http://auth-service:5002
+      - REVIEWS_SERVICE_URL=http://reviews-service:5003
+    depends_on:
+      - books-service
+      - auth-service
+      - reviews-service
+    networks:
+      - bookstore-network
+
+volumes:
+  mongo_data:
+
+networks:
+  bookstore-network:
+    driver: bridge

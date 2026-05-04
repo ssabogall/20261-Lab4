@@ -1,21 +1,20 @@
 {
-  "name": "books-service",
+  "name": "reviews-service",
   "version": "1.0.0",
   "main": "server.js",
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js",
-    "seeder": "node seeder.js"
+    "dev": "nodemon server.js"
   },
   "keywords": [],
   "author": "",
   "license": "MIT",
-  "description": "Microservicio de libros - MyBookStore",
+  "description": "Microservicio de reseñas y datos enriquecidos - MyBookStore",
   "dependencies": {
+    "axios": "^1.9.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
-    "express": "^5.1.0",
-    "mongoose": "^8.15.0"
+    "express": "^5.1.0"
   }
 }

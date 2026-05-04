@@ -5,9 +5,17 @@ server {
     root /usr/share/nginx/html/;
     include /etc/nginx/mime.types;
     try_files $uri $uri/ /index.html;
-    }
-  
+  }
+
   location /api/books {
-    proxy_pass ${PROXY_PASS};
-    }
+    proxy_pass ${BOOKS_SERVICE_URL};
+  }
+
+  location /api/auth {
+    proxy_pass ${AUTH_SERVICE_URL};
+  }
+
+  location /api/reviews {
+    proxy_pass ${REVIEWS_SERVICE_URL};
+  }
 }

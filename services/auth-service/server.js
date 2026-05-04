@@ -1,13 +1,9 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import connectDB from "./config/db.js";
-import bookRoutes from "./routes/bookRoutes.js";
+import authRoutes from "./routes/authRoutes.js";
 
 dotenv.config();
-
-// Connect to MongoDB
-connectDB();
 
 const app = express();
 
@@ -15,10 +11,10 @@ app.use(cors());
 app.use(express.json());
 
 app.get("/", (req, res) => {
-  res.json({ status: "Ok", service: "books-service" });
+  res.json({ status: "Ok", service: "auth-service" });
 });
 
-app.use("/api/books", bookRoutes);
+app.use("/api/auth", authRoutes);
 
 app.use((err, req, res, next) => {
   console.error("Error:", err);
@@ -27,8 +23,8 @@ app.use((err, req, res, next) => {
   });
 });
 
-const PORT = process.env.PORT || 5001;
+const PORT = process.env.PORT || 5002;
 
 app.listen(PORT, () => {
-  console.log(`books-service running on port ${PORT}`);
+  console.log(`auth-service running on port ${PORT}`);
 });

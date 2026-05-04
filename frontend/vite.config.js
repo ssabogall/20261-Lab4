@@ -8,10 +8,18 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      '/api/books/': {
+      '/api/books': {
         target: 'http://localhost:5001',
         changeOrigin: true,
-      }
+      },
+      '/api/auth': {
+        target: 'http://localhost:5002',
+        changeOrigin: true,
+      },
+      '/api/reviews': {
+        target: 'http://localhost:5003',
+        changeOrigin: true,
+      },
     }
   }
 })
