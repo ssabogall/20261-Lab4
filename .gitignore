@@ -24,6 +24,7 @@ logs/*.log
 # OS files
 .DS_Store
 Thumbs.db
+k8s.zip
 
 # Build outputs
 dist/
