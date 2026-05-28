@@ -1,15 +1,37 @@
 import React from 'react';
-import { Card } from 'react-bootstrap';
+import { Card, Badge } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 
 const Book = ({ book }) => {
     return (
-        <Card className="my-3 p-3 rounded shadow-sm h-100 book-card" style={{ transition: 'transform 0.2s' }}>
+        <Card
+            className="my-3 p-3 rounded shadow-sm h-100 book-card"
+            style={{ transition: 'transform 0.2s', position: 'relative' }}
+        >
+            {/* ── Badge "Poco stock" ─────────────────────────────── */}
+            {book.lowStock && (
+                <Badge
+                    bg="danger"
+                    style={{
+                        position: 'absolute',
+                        top: '12px',
+                        left: '12px',
+                        zIndex: 10,
+                        fontSize: '0.7rem',
+                        letterSpacing: '0.03em',
+                        padding: '5px 8px',
+                        borderRadius: '6px',
+                    }}
+                >
+                    ⚠ Poco stock
+                </Badge>
+            )}
+
             <Link to={`/book/${book.id}`}>
-                <Card.Img 
-                    src={book.image || '/placeholder.png'} 
-                    variant="top" 
-                    style={{ height: '250px', objectFit: 'cover' }} 
+                <Card.Img
+                    src={book.image || '/placeholder.png'}
+                    variant="top"
+                    style={{ height: '250px', objectFit: 'cover' }}
                 />
             </Link>
 

@@ -13,9 +13,16 @@
   "license": "MIT",
   "description": "Microservicio de libros - MyBookStore",
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1055.0",
+    "@aws-sdk/credential-providers": "^3.1055.0",
+    "@aws-sdk/lib-dynamodb": "^3.1055.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
-    "mongoose": "^8.15.0"
+    "mongoose": "^8.15.0",
+    "uuid": "^14.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
   }
 }

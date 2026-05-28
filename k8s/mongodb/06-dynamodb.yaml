@@ -1,0 +1,50 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  MyBookStore — Stack 06: DynamoDB
+  Tabla books con Streams habilitado (trigger para Lambda notificarStockBajo).
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: bookstore
+
+Resources:
+
+  BooksTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectName}-books"
+      BillingMode: PAY_PER_REQUEST
+      # Clave primaria: id (String) — compatible con dynamo.js existente
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      # Streams ON — necesario para Lambda notificarStockBajo
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Name
+          Value: !Sub "${ProjectName}-books"
+
+Outputs:
+  BooksTableName:
+    Value: !Ref BooksTable
+    Export:
+      Name: !Sub "${ProjectName}-BooksTableName"
+
+  BooksTableArn:
+    Value: !GetAtt BooksTable.Arn
+    Export:
+      Name: !Sub "${ProjectName}-BooksTableArn"
+
+  BooksTableStreamArn:
+    Value: !GetAtt BooksTable.StreamArn
+    Export:
+      Name: !Sub "${ProjectName}-BooksTableStreamArn"

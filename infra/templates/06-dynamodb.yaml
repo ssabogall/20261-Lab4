@@ -1,0 +1,55 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  MyBookStore — Stack 06: DynamoDB
+  Tabla principal de libros con DynamoDB Streams habilitados.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: bookstore
+
+Resources:
+
+  BooksTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectName}-books"
+
+      BillingMode: PAY_PER_REQUEST
+
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+
+      # Habilitar DynamoDB Streams — necesario para la Lambda detectarStockBajo
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+Outputs:
+  BooksTableName:
+    Description: Nombre de la tabla DynamoDB
+    Value: !Ref BooksTable
+    Export:
+      Name: !Sub "${ProjectName}-BooksTableName"
+
+  BooksTableArn:
+    Description: ARN de la tabla DynamoDB
+    Value: !GetAtt BooksTable.Arn
+    Export:
+      Name: !Sub "${ProjectName}-BooksTableArn"
+
+  BooksTableStreamArn:
+    Description: ARN del stream de DynamoDB (para la Lambda)
+    Value: !GetAtt BooksTable.StreamArn
+    Export:
+      Name: !Sub "${ProjectName}-BooksTableStreamArn"

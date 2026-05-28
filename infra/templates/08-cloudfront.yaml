@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  MyBookStore — Stack 08: CloudFront
+  Distribución CDN con dos origins: S3 frontend (/) y ALB (/api/*).
+  Certificado ACM en us-east-1 (requerido por CloudFront).
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: bookstore
+
+  AlbDnsName:
+    Type: String
+    Description: >
+      DNS del ALB creado por el frontend-service de EKS.
+      Obtenerlo con: kubectl get svc frontend-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+
+Resources:
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: !Sub "${ProjectName} - Frontend S3 + API ALB"
+        Enabled: true
+        DefaultRootObject: index.html
+        HttpVersion: http2
+        PriceClass: PriceClass_100
+
+        Origins:
+          # Origin 1: S3 Frontend (archivos estáticos React)
+          - Id: S3FrontendOrigin
+            DomainName: !Sub
+              - "${BucketName}.s3.${AWS::Region}.amazonaws.com"
+              - BucketName: !ImportValue
+                  Fn::Sub: "${ProjectName}-FrontendBucketName"
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+            OriginAccessControlId: !ImportValue
+              Fn::Sub: "${ProjectName}-CloudFrontOACId"
+
+          # Origin 2: ALB (microservicios /api/*)
+          - Id: ALBOrigin
+            DomainName: !Ref AlbDnsName
+            CustomOriginConfig:
+              HTTPPort: 80
+              HTTPSPort: 443
+              OriginProtocolPolicy: http-only
+
+        # Comportamientos de caché
+        CacheBehaviors:
+          # /api/* → ALB sin caché
+          - PathPattern: "/api/*"
+            TargetOriginId: ALBOrigin
+            ViewerProtocolPolicy: redirect-to-https
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # CachingDisabled
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            CachedMethods: [GET, HEAD]
+
+        # Comportamiento por defecto → S3 (React)
+        DefaultCacheBehavior:
+          TargetOriginId: S3FrontendOrigin
+          ViewerProtocolPolicy: redirect-to-https
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # CachingOptimized
+          AllowedMethods: [GET, HEAD]
+          CachedMethods: [GET, HEAD]
+
+        # SPA: redirigir 403/404 a index.html para React Router
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+Outputs:
+  CloudFrontDomain:
+    Description: Dominio de la distribución CloudFront
+    Value: !GetAtt CloudFrontDistribution.DomainName
+    Export:
+      Name: !Sub "${ProjectName}-CloudFrontDomain"
+
+  CloudFrontId:
+    Value: !Ref CloudFrontDistribution
+    Export:
+      Name: !Sub "${ProjectName}-CloudFrontId"
+
+  FrontendUrl:
+    Description: URL pública de la aplicación
+    Value: !Sub "https://${CloudFrontDistribution.DomainName}"

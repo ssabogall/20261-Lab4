@@ -1,0 +1,100 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  MyBookStore — Stack 04: ECR Repositories
+  Crea los 3 repositorios ECR para los microservicios.
+  El frontend ya no tiene imagen Docker (va a S3).
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: bookstore
+
+Resources:
+
+  ECRBooks:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub "${ProjectName}-books-service"
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [{
+              "rulePriority": 1,
+              "description": "Mantener solo las 5 imagenes mas recientes",
+              "selection": {
+                "tagStatus": "any",
+                "countType": "imageCountMoreThan",
+                "countNumber": 5
+              },
+              "action": { "type": "expire" }
+            }]
+          }
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  ECRAuth:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub "${ProjectName}-auth-service"
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [{
+              "rulePriority": 1,
+              "description": "Mantener solo las 5 imagenes mas recientes",
+              "selection": {
+                "tagStatus": "any",
+                "countType": "imageCountMoreThan",
+                "countNumber": 5
+              },
+              "action": { "type": "expire" }
+            }]
+          }
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  ECRReviews:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub "${ProjectName}-reviews-service"
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [{
+              "rulePriority": 1,
+              "description": "Mantener solo las 5 imagenes mas recientes",
+              "selection": {
+                "tagStatus": "any",
+                "countType": "imageCountMoreThan",
+                "countNumber": 5
+              },
+              "action": { "type": "expire" }
+            }]
+          }
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+Outputs:
+  ECRBooksUri:
+    Value: !GetAtt ECRBooks.RepositoryUri
+    Export:
+      Name: !Sub "${ProjectName}-ECRBooksUri"
+
+  ECRAuthUri:
+    Value: !GetAtt ECRAuth.RepositoryUri
+    Export:
+      Name: !Sub "${ProjectName}-ECRAuthUri"
+
+  ECRReviewsUri:
+    Value: !GetAtt ECRReviews.RepositoryUri
+    Export:
+      Name: !Sub "${ProjectName}-ECRReviewsUri"

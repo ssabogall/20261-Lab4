@@ -1,0 +1,263 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  MyBookStore — Stack 01: VPC
+  VPC con CIDR configurable, 2 AZ, subredes públicas y privadas,
+  Internet Gateway, NAT Gateways, tablas de ruteo y VPC Endpoint S3.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: bookstore
+
+  VpcCidr:
+    Type: String
+    Default: "10.0.0.0/16"
+
+  AZ1:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Default: us-east-1a
+
+  AZ2:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Default: us-east-1b
+
+Resources:
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-vpc"
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-igw"
+
+  AttachIGW:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # ── Subredes públicas ──
+  PublicSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Ref AZ1
+      CidrBlock: !Select [0, !Cidr [!GetAtt VPC.CidrBlock, 8, 8]]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-public-az1"
+        - Key: !Sub "kubernetes.io/cluster/${ProjectName}-cluster"
+          Value: shared
+        - Key: kubernetes.io/role/elb
+          Value: "1"
+
+  PublicSubnetAZ2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Ref AZ2
+      CidrBlock: !Select [1, !Cidr [!GetAtt VPC.CidrBlock, 8, 8]]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-public-az2"
+        - Key: !Sub "kubernetes.io/cluster/${ProjectName}-cluster"
+          Value: shared
+        - Key: kubernetes.io/role/elb
+          Value: "1"
+
+  # ── Subredes privadas ──
+  PrivateSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Ref AZ1
+      CidrBlock: !Select [2, !Cidr [!GetAtt VPC.CidrBlock, 8, 8]]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-private-az1"
+        - Key: !Sub "kubernetes.io/cluster/${ProjectName}-cluster"
+          Value: shared
+        - Key: kubernetes.io/role/internal-elb
+          Value: "1"
+
+  PrivateSubnetAZ2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Ref AZ2
+      CidrBlock: !Select [3, !Cidr [!GetAtt VPC.CidrBlock, 8, 8]]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-private-az2"
+        - Key: !Sub "kubernetes.io/cluster/${ProjectName}-cluster"
+          Value: shared
+        - Key: kubernetes.io/role/internal-elb
+          Value: "1"
+
+  # ── NAT Gateways ──
+  EipNatAZ1:
+    Type: AWS::EC2::EIP
+    DependsOn: AttachIGW
+    Properties:
+      Domain: vpc
+
+  EipNatAZ2:
+    Type: AWS::EC2::EIP
+    DependsOn: AttachIGW
+    Properties:
+      Domain: vpc
+
+  NatGatewayAZ1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt EipNatAZ1.AllocationId
+      SubnetId: !Ref PublicSubnetAZ1
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-nat-az1"
+
+  NatGatewayAZ2:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt EipNatAZ2.AllocationId
+      SubnetId: !Ref PublicSubnetAZ2
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-nat-az2"
+
+  # ── Tablas de ruteo ──
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-rtb-public"
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachIGW
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref InternetGateway
+
+  PubSubAZ1Assoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetAZ1
+      RouteTableId: !Ref PublicRouteTable
+
+  PubSubAZ2Assoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetAZ2
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateRouteTableAZ1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-rtb-private-az1"
+
+  PrivateRouteAZ1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableAZ1
+      DestinationCidrBlock: "0.0.0.0/0"
+      NatGatewayId: !Ref NatGatewayAZ1
+
+  PrivSubAZ1Assoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetAZ1
+      RouteTableId: !Ref PrivateRouteTableAZ1
+
+  PrivateRouteTableAZ2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-rtb-private-az2"
+
+  PrivateRouteAZ2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableAZ2
+      DestinationCidrBlock: "0.0.0.0/0"
+      NatGatewayId: !Ref NatGatewayAZ2
+
+  PrivSubAZ2Assoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetAZ2
+      RouteTableId: !Ref PrivateRouteTableAZ2
+
+  # ── VPC Endpoint S3 (evita costo NAT para S3) ──
+  S3VpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !Ref PrivateRouteTableAZ1
+        - !Ref PrivateRouteTableAZ2
+
+Outputs:
+  VpcId:
+    Value: !Ref VPC
+    Export:
+      Name: !Sub "${ProjectName}-VpcId"
+
+  VpcCidr:
+    Value: !GetAtt VPC.CidrBlock
+    Export:
+      Name: !Sub "${ProjectName}-VpcCidr"
+
+  PublicSubnetAZ1Id:
+    Value: !Ref PublicSubnetAZ1
+    Export:
+      Name: !Sub "${ProjectName}-PublicSubnetAZ1Id"
+
+  PublicSubnetAZ2Id:
+    Value: !Ref PublicSubnetAZ2
+    Export:
+      Name: !Sub "${ProjectName}-PublicSubnetAZ2Id"
+
+  PrivateSubnetAZ1Id:
+    Value: !Ref PrivateSubnetAZ1
+    Export:
+      Name: !Sub "${ProjectName}-PrivateSubnetAZ1Id"
+
+  PrivateSubnetAZ2Id:
+    Value: !Ref PrivateSubnetAZ2
+    Export:
+      Name: !Sub "${ProjectName}-PrivateSubnetAZ2Id"
+
+  PublicSubnetIds:
+    Value: !Join [",", [!Ref PublicSubnetAZ1, !Ref PublicSubnetAZ2]]
+    Export:
+      Name: !Sub "${ProjectName}-PublicSubnetIds"
+
+  PrivateSubnetIds:
+    Value: !Join [",", [!Ref PrivateSubnetAZ1, !Ref PrivateSubnetAZ2]]
+    Export:
+      Name: !Sub "${ProjectName}-PrivateSubnetIds"

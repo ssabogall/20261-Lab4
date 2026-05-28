@@ -1,0 +1,118 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  MyBookStore — Stack 02: Security Groups
+  SG-alb (entrada pública 80/443), SG-eks (solo desde ALB y Bastion),
+  SG-bastion (SSH solo desde tu IP). Reglas cruzadas entre grupos.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: bookstore
+
+  BastionAllowedCidr:
+    Type: String
+    Default: "0.0.0.0/0"
+    Description: >
+      CIDR desde el cual se permite SSH al Bastion.
+      En producción reemplaza con tu IP: X.X.X.X/32
+
+Resources:
+
+  # ── SG ALB — acepta tráfico HTTP/HTTPS desde Internet ──
+  SGAlb:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${ProjectName}-sg-alb"
+      GroupDescription: Trafico publico HTTP y HTTPS hacia el ALB
+      VpcId: !ImportValue
+        Fn::Sub: "${ProjectName}-VpcId"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: "0.0.0.0/0"
+          Description: HTTP publico
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: "0.0.0.0/0"
+          Description: HTTPS publico
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-sg-alb"
+
+  # ── SG EKS — solo acepta tráfico desde el ALB y el Bastion ──
+  SGEks:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${ProjectName}-sg-eks"
+      GroupDescription: Trafico hacia pods EKS solo desde ALB y Bastion
+      VpcId: !ImportValue
+        Fn::Sub: "${ProjectName}-VpcId"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5001
+          ToPort: 5003
+          SourceSecurityGroupId: !Ref SGAlb
+          Description: Microservicios desde ALB
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref SGAlb
+          Description: HTTP desde ALB
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref SGAlb
+          Description: HTTPS desde ALB
+        - IpProtocol: tcp
+          FromPort: 1025
+          ToPort: 65535
+          SourceSecurityGroupId: !Ref SGBastion
+          Description: Acceso admin desde Bastion
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-sg-eks"
+
+  # ── SG Bastion — SSH desde CIDR configurado ──
+  SGBastion:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${ProjectName}-sg-bastion"
+      GroupDescription: SSH al Bastion Host
+      VpcId: !ImportValue
+        Fn::Sub: "${ProjectName}-VpcId"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref BastionAllowedCidr
+          Description: SSH desde IP autorizada
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-sg-bastion"
+
+  # Regla de egress explícita para EKS (permite salida via NAT)
+  SGEksEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref SGEks
+      IpProtocol: "-1"
+      CidrIp: "0.0.0.0/0"
+      Description: Salida libre para pods (NAT Gateway)
+
+Outputs:
+  SGAlbId:
+    Value: !Ref SGAlb
+    Export:
+      Name: !Sub "${ProjectName}-SGAlbId"
+
+  SGEksId:
+    Value: !Ref SGEks
+    Export:
+      Name: !Sub "${ProjectName}-SGEksId"
+
+  SGBastionId:
+    Value: !Ref SGBastion
+    Export:
+      Name: !Sub "${ProjectName}-SGBastionId"

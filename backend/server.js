@@ -1,13 +1,9 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import connectDB from "./config/db.js";
 import bookRoutes from "./routes/bookRoutes.js";
 
 dotenv.config();
-
-// Connect to MongoDB
-connectDB();
 
 const app = express();
 
@@ -31,4 +27,6 @@ const PORT = process.env.PORT || 5001;
 
 app.listen(PORT, () => {
   console.log(`books-service running on port ${PORT}`);
+  console.log(`DynamoDB table: ${process.env.DYNAMO_TABLE || "bookstore-books"}`);
+  console.log(`Region: ${process.env.AWS_REGION || "us-east-1"}`);
 });

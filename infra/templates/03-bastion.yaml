@@ -1,0 +1,79 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  MyBookStore — Stack 03: Bastion Host
+  EC2 t3.micro en subred pública AZ1 con acceso SSH.
+  Único punto de entrada administrativa a la red privada.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: bookstore
+
+  BastionInstanceType:
+    Type: String
+    Default: t3.micro
+
+  # AMI Amazon Linux 2023 us-east-1 (actualiza si usas otra región)
+  BastionAmi:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    Description: AMI obtenida automáticamente desde SSM Parameter Store.
+
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: >
+      Nombre del Key Pair existente en tu cuenta para acceso SSH.
+      Créalo en EC2 > Key Pairs antes de desplegar este stack.
+
+Resources:
+
+  BastionInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref BastionInstanceType
+      ImageId: !Ref BastionAmi
+      KeyName: !Ref KeyPairName
+      SubnetId: !ImportValue
+        Fn::Sub: "${ProjectName}-PublicSubnetAZ1Id"
+      SecurityGroupIds:
+        - !ImportValue
+          Fn::Sub: "${ProjectName}-SGBastionId"
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-bastion"
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          yum update -y
+          yum install -y kubectl
+          # Instalar AWS CLI v2
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          ./aws/install
+          echo "Bastion Host listo - ${ProjectName}"
+
+  # IP elástica para el Bastion (IP fija para tu regla SSH)
+  BastionEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      InstanceId: !Ref BastionInstance
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-bastion-eip"
+
+Outputs:
+  BastionPublicIp:
+    Description: IP pública del Bastion Host (usa esta IP en SG-bastion)
+    Value: !Ref BastionEIP
+    Export:
+      Name: !Sub "${ProjectName}-BastionPublicIp"
+
+  BastionInstanceId:
+    Value: !Ref BastionInstance
+    Export:
+      Name: !Sub "${ProjectName}-BastionInstanceId"
+
+  SSHCommand:
+    Description: Comando para conectarse al Bastion
+    Value: !Sub "ssh -i ${KeyPairName}.pem ec2-user@${BastionEIP}"

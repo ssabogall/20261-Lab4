@@ -1,14 +1,122 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../lib/api';
-
 import { Link, useParams } from 'react-router-dom';
-import { Row, Col, Image, ListGroup, Badge, Spinner } from 'react-bootstrap';
-import { Button } from 'react-bootstrap';
+import { Row, Col, Image, ListGroup, Badge, Spinner, Alert, Button } from 'react-bootstrap';
 
 
+/* ─── Panel de edición de stock ─────────────────────────────────── */
+const StockEditor = ({ bookId, currentStock, onUpdated }) => {
+    const [stock,   setStock]   = useState(currentStock);
+    const [saving,  setSaving]  = useState(false);
+    const [success, setSuccess] = useState(false);
+    const [error,   setError]   = useState(null);
+
+    // Sincroniza si el libro se recarga desde fuera
+    useEffect(() => { setStock(currentStock); }, [currentStock]);
+
+    const handleChange = (delta) => {
+        setStock(prev => Math.max(0, prev + delta));
+        setSuccess(false);
+        setError(null);
+    };
+
+    const handleSave = async () => {
+        setSaving(true);
+        setSuccess(false);
+        setError(null);
+        try {
+            const { data } = await api.put(`/api/books/${bookId}/stock`, {
+                countInStock: stock,
+            });
+            setSuccess(true);
+            onUpdated(data);           // actualiza el estado del padre (book)
+            setTimeout(() => setSuccess(false), 3000);
+        } catch (err) {
+            setError("No se pudo actualizar el stock.");
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const dirty = stock !== currentStock;
+
+    return (
+        <div
+            className="p-3 rounded"
+            style={{ background: '#f8f9fa', border: '1px solid #dee2e6' }}
+        >
+            <p className="mb-2 fw-semibold" style={{ fontSize: '0.9rem' }}>
+                Actualizar stock
+            </p>
+
+            {/* Controles +/- */}
+            <div className="d-flex align-items-center gap-2 mb-3">
+                <Button
+                    variant="outline-secondary"
+                    size="sm"
+                    onClick={() => handleChange(-1)}
+                    disabled={stock <= 0 || saving}
+                    style={{ width: '36px', fontWeight: 'bold' }}
+                >
+                    −
+                </Button>
+
+                <span
+                    className="fw-bold text-center"
+                    style={{
+                        minWidth: '40px',
+                        fontSize: '1.2rem',
+                        color: stock <= 3 ? '#dc3545' : '#212529',
+                    }}
+                >
+                    {stock}
+                </span>
+
+                <Button
+                    variant="outline-secondary"
+                    size="sm"
+                    onClick={() => handleChange(+1)}
+                    disabled={saving}
+                    style={{ width: '36px', fontWeight: 'bold' }}
+                >
+                    +
+                </Button>
+            </div>
+
+            {/* Botón guardar */}
+            <Button
+                variant={dirty ? "primary" : "secondary"}
+                size="sm"
+                className="w-100"
+                onClick={handleSave}
+                disabled={!dirty || saving}
+            >
+                {saving
+                    ? <><Spinner animation="border" size="sm" className="me-1" /> Guardando…</>
+                    : "Guardar cambios"
+                }
+            </Button>
+
+            {/* Feedback */}
+            {success && (
+                <p className="text-success mt-2 mb-0" style={{ fontSize: '0.82rem' }}>
+                    ✅ Stock actualizado correctamente
+                </p>
+            )}
+            {error && (
+                <p className="text-danger mt-2 mb-0" style={{ fontSize: '0.82rem' }}>
+                    ❌ {error}
+                </p>
+            )}
+        </div>
+    );
+};
+
+
+/* ─── Pantalla de detalle del libro ─────────────────────────────── */
 const BookScreen = () => {
-    const [book, setBook] = useState({});
-    const [review, setReview] = useState(null);
+    const [book,          setBook]          = useState({});
+    const [review,        setReview]        = useState(null);
     const [reviewLoading, setReviewLoading] = useState(false);
     const { id } = useParams();
 
@@ -17,7 +125,6 @@ const BookScreen = () => {
             const { data } = await api.get(`/api/books/${id}`);
             setBook(data);
 
-            // Fetch enriched data from reviews-service using the book title
             if (data.name) {
                 setReviewLoading(true);
                 try {
@@ -35,6 +142,10 @@ const BookScreen = () => {
         fetchBook();
     }, [id]);
 
+    // Callback: el StockEditor devuelve el libro actualizado desde el backend
+    const handleStockUpdated = (updatedBook) => {
+        setBook(updatedBook);
+    };
 
     return (
         <>
@@ -46,11 +157,30 @@ const BookScreen = () => {
                 </Link>
             </div>
 
+            {/* ── Alerta de Poco Stock ──────────────────────────── */}
+            {book.lowStock && (
+                <Alert
+                    variant="warning"
+                    className="d-flex align-items-center gap-2 mb-4"
+                    style={{ borderLeft: '4px solid #fd7e14' }}
+                >
+                    <span style={{ fontSize: '1.2rem' }}>⚠️</span>
+                    <div>
+                        <strong>¡Pocas unidades disponibles!</strong>
+                        <span className="text-muted ms-2">
+                            Solo quedan <strong>{book.countInStock}</strong> unidad{book.countInStock !== 1 ? 'es' : ''}.
+                        </span>
+                    </div>
+                </Alert>
+            )}
+
             <Row>
+                {/* Portada */}
                 <Col md={4}>
                     <Image src={book.image} alt={book.name} fluid />
                 </Col>
 
+                {/* Info del libro */}
                 <Col md={4}>
                     <ListGroup variant='flush'>
                         <ListGroup.Item><h3>{book.name}</h3></ListGroup.Item>
@@ -59,12 +189,38 @@ const BookScreen = () => {
                     </ListGroup>
                 </Col>
 
+                {/* Panel de stock + precio + editor */}
                 <Col md={3}>
                     <ListGroup variant='flush'>
                         <ListGroup.Item>
-                            Estado: {book.countInStock > 0 ? 'Disponible' : 'No Disponible'} ({book.countInStock}) uds
+                            <div className="d-flex align-items-center gap-2 flex-wrap">
+                                <span>
+                                    Estado:{' '}
+                                    {book.countInStock > 0 ? 'Disponible' : 'No Disponible'}{' '}
+                                    ({book.countInStock}) uds
+                                </span>
+                                {book.lowStock && (
+                                    <Badge bg="danger" style={{ fontSize: '0.7rem' }}>
+                                        ⚠ Poco stock
+                                    </Badge>
+                                )}
+                            </div>
                         </ListGroup.Item>
-                        <ListGroup.Item><strong>Precio:</strong> {book.price}</ListGroup.Item>
+
+                        <ListGroup.Item>
+                            <strong>Precio:</strong> {book.price}
+                        </ListGroup.Item>
+
+                        {/* ── Editor de stock ───────────────────── */}
+                        {book.id && (
+                            <ListGroup.Item className="px-0 pt-3">
+                                <StockEditor
+                                    bookId={book.id}
+                                    currentStock={book.countInStock ?? 0}
+                                    onUpdated={handleStockUpdated}
+                                />
+                            </ListGroup.Item>
+                        )}
                     </ListGroup>
                 </Col>
             </Row>

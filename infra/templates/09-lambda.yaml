@@ -1,0 +1,237 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  MyBookStore — Stack 09: Lambda Functions
+  Lambda 1: procesarPortada
+  Lambda 2: detectarStockBajo  (con guard anti-loop-infinito)
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: bookstore
+
+  StockThreshold:
+    Type: Number
+    Default: 3
+
+Resources:
+
+  # ═══════════════════════════════════════
+  # IAM Role para Lambdas
+  # ═══════════════════════════════════════
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-lambda-role"
+
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+      Policies:
+        - PolicyName: LambdaBookstorePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+
+              # S3
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource:
+                  - !Sub
+                    - "arn:aws:s3:::${Bucket}/covers/raw/*"
+                    - Bucket: !ImportValue
+                        Fn::Sub: "${ProjectName}-ObjectsBucketName"
+                  - !Sub
+                    - "arn:aws:s3:::${Bucket}/covers/processed/*"
+                    - Bucket: !ImportValue
+                        Fn::Sub: "${ProjectName}-ObjectsBucketName"
+
+              # DynamoDB — lectura + escritura del ítem
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                Resource: !ImportValue
+                  Fn::Sub: "${ProjectName}-BooksTableArn"
+
+              # DynamoDB Streams — lectura del stream
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetRecords
+                  - dynamodb:GetShardIterator
+                  - dynamodb:DescribeStream
+                  - dynamodb:ListStreams
+                Resource: !ImportValue
+                  Fn::Sub: "${ProjectName}-BooksTableStreamArn"
+
+  # ═══════════════════════════════════════
+  # Lambda 1 — procesarPortada
+  # ═══════════════════════════════════════
+  LambdaProcesarPortada:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-procesarPortada"
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 512
+
+      Environment:
+        Variables:
+          DYNAMO_TABLE: !ImportValue
+            Fn::Sub: "${ProjectName}-BooksTableName"
+          CDN_DOMAIN: !ImportValue
+            Fn::Sub: "${ProjectName}-CloudFrontDomain"
+
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+            console.log("procesarPortada invocada");
+            return { statusCode: 200 };
+          };
+
+  LambdaS3Permission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt LambdaProcesarPortada.Arn
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !ImportValue
+        Fn::Sub: "${ProjectName}-ObjectsBucketArn"
+
+  # ═══════════════════════════════════════
+  # Lambda 2 — detectarStockBajo
+  # ═══════════════════════════════════════
+  LambdaDetectarStockBajo:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-detectarStockBajo"
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 15
+      MemorySize: 128
+
+      Environment:
+        Variables:
+          DYNAMO_TABLE: !ImportValue
+            Fn::Sub: "${ProjectName}-BooksTableName"
+          STOCK_THRESHOLD: !Sub "${StockThreshold}"
+
+      Code:
+        ZipFile: |
+          const {
+            DynamoDBClient,
+            UpdateItemCommand
+          } = require("@aws-sdk/client-dynamodb");
+
+          const dynamo = new DynamoDBClient({});
+          const THRESHOLD = parseInt(process.env.STOCK_THRESHOLD || "3");
+
+          exports.handler = async (event) => {
+
+            for (const record of event.Records) {
+
+              // ── Solo procesar modificaciones ────────────────────
+              if (record.eventName !== "MODIFY") {
+                console.log(`Evento ${record.eventName} ignorado`);
+                continue;
+              }
+
+              const newImage = record.dynamodb?.NewImage;
+              const oldImage = record.dynamodb?.OldImage;
+
+              // ── Validar que existan los campos necesarios ────────
+              if (!newImage?.countInStock?.N || !newImage?.id?.S) {
+                console.log("Registro sin countInStock o id, ignorado");
+                continue;
+              }
+
+              const bookId    = newImage.id.S;
+              const stock     = parseInt(newImage.countInStock.N);
+              const lowStock  = stock <= THRESHOLD;
+
+              // ── GUARD ANTI-LOOP-INFINITO ─────────────────────────
+              // Si lowStock no cambió respecto al estado anterior,
+              // no hacemos la actualización → evita el ciclo infinito
+              // OldImage.lowStock.BOOL puede ser undefined si el campo
+              // aún no existe (primera vez), por eso lo tratamos como false.
+              const oldLowStock = oldImage?.lowStock?.BOOL ?? null;
+
+              if (oldLowStock === lowStock) {
+                console.log(
+                  `Libro ${bookId}: lowStock ya era ${lowStock}, sin cambios — skipping`
+                );
+                continue;
+              }
+
+              // ── Actualizar solo cuando hay un cambio real ─────────
+              try {
+                await dynamo.send(
+                  new UpdateItemCommand({
+                    TableName: process.env.DYNAMO_TABLE,
+                    Key: { id: { S: bookId } },
+                    UpdateExpression: "SET lowStock = :val",
+                    ExpressionAttributeValues: {
+                      ":val": { BOOL: lowStock }
+                    },
+                    // Condición extra: solo actualiza si el valor
+                    // realmente es diferente al que hay en la tabla
+                    ConditionExpression:
+                      "attribute_not_exists(lowStock) OR lowStock <> :val"
+                  })
+                );
+                console.log(
+                  `✅ Libro ${bookId} | stock=${stock} | lowStock=${lowStock}`
+                );
+              } catch (err) {
+                // ConditionalCheckFailedException = ya tenía ese valor,
+                // no es un error real — solo lo logueamos y seguimos.
+                if (err.name === "ConditionalCheckFailedException") {
+                  console.log(
+                    `Libro ${bookId}: condición no cumplida (lowStock ya era ${lowStock})`
+                  );
+                } else {
+                  console.error(`Error actualizando libro ${bookId}:`, err.message);
+                  throw err;
+                }
+              }
+            }
+
+            return { statusCode: 200 };
+          };
+
+  # ── Trigger: DynamoDB Stream → Lambda ───────────────────────
+  LambdaDynamoTrigger:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      FunctionName: !GetAtt LambdaDetectarStockBajo.Arn
+      EventSourceArn: !ImportValue
+        Fn::Sub: "${ProjectName}-BooksTableStreamArn"
+      StartingPosition: LATEST
+      BatchSize: 10
+      # Filtrar en el source mapping: solo enviar eventos MODIFY
+      FilterCriteria:
+        Filters:
+          - Pattern: '{"eventName": ["MODIFY"]}'
+
+Outputs:
+  LambdaProcesarPortadaArn:
+    Value: !GetAtt LambdaProcesarPortada.Arn
+    Export:
+      Name: !Sub "${ProjectName}-LambdaProcesarPortadaArn"
+
+  LambdaDetectarStockBajoArn:
+    Value: !GetAtt LambdaDetectarStockBajo.Arn
+    Export:
+      Name: !Sub "${ProjectName}-LambdaDetectarStockBajoArn"
