@@ -46,32 +46,42 @@ Resources:
       GroupDescription: Trafico pods EKS desde ALB e intra-cluster
       VpcId: !ImportValue
         Fn::Sub: "${ProjectName}-VpcId"
+
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 5001
           ToPort: 5003
           SourceSecurityGroupId: !Ref SGAlb
           Description: Microservicios desde ALB
+
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
           SourceSecurityGroupId: !Ref SGAlb
           Description: HTTP desde ALB
+
         - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
           SourceSecurityGroupId: !Ref SGAlb
           Description: HTTPS desde ALB
-        - IpProtocol: "-1"
-          SourceSecurityGroupId: !Ref SGEks
-          Description: Comunicacion interna EKS intra-cluster
+
       SecurityGroupEgress:
         - IpProtocol: "-1"
           CidrIp: "0.0.0.0/0"
           Description: Salida libre pods via NAT
+
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-sg-eks"
+
+  SGEksIngressSelf:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref SGEks
+      IpProtocol: "-1"
+      SourceSecurityGroupId: !Ref SGEks
+      Description: Comunicación interna EKS
 
 Outputs:
   SGAlbId:
