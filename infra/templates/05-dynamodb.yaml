@@ -1,7 +1,8 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  MyBookStore — Stack 06: DynamoDB
-  Tabla books con Streams habilitado (trigger para Lambda notificarStockBajo).
+  MyBookStore - Stack 05: DynamoDB
+  Tabla books con Streams habilitado.
+  Trigger para Lambda notificarStockBajo (actualiza campo lowStock).
 
 Parameters:
   ProjectName:
@@ -15,14 +16,14 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectName}-books"
       BillingMode: PAY_PER_REQUEST
-      # Clave primaria: id (String) — compatible con dynamo.js existente
+      # id String - compatible con dynamo.js existente en el proyecto
       AttributeDefinitions:
         - AttributeName: id
           AttributeType: S
       KeySchema:
         - AttributeName: id
           KeyType: HASH
-      # Streams ON — necesario para Lambda notificarStockBajo
+      # Streams ON con NEW_AND_OLD_IMAGES para detectar cambios en countInStock
       StreamSpecification:
         StreamViewType: NEW_AND_OLD_IMAGES
       PointInTimeRecoverySpecification:

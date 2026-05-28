@@ -14,7 +14,8 @@ spec:
     spec:
       containers:
         - name: books-service
-          image: 261273955683.dkr.ecr.us-east-1.amazonaws.com/bookstore-books-service:latest
+          # ACCOUNT_ID se reemplaza por deploy-all.sh antes de aplicar
+          image: <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/bookstore-books-service:latest
           ports:
             - containerPort: 5001
           env:
@@ -22,8 +23,10 @@ spec:
               value: "5001"
             - name: NODE_ENV
               value: "production"
-            - name: MONGO_URI
+            - name: AWS_REGION
+              value: "us-east-1"
+            - name: DYNAMO_TABLE
               valueFrom:
                 secretKeyRef:
-                  name: mongodb-secret
-                  key: mongo-uri
+                  name: dynamo-secret
+                  key: dynamo-table

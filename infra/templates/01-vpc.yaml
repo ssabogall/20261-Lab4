@@ -1,8 +1,9 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  MyBookStore — Stack 01: VPC
-  VPC con CIDR configurable, 2 AZ, subredes públicas y privadas,
-  Internet Gateway, NAT Gateways, tablas de ruteo y VPC Endpoint S3.
+  MyBookStore - Stack 01: VPC
+  VPC con CIDR configurable, 2 AZ, subredes publicas y privadas,
+  Internet Gateway, 1 NAT Gateway (ahorro creditos Academy),
+  tablas de ruteo y VPC Endpoint S3.
 
 Parameters:
   ProjectName:
@@ -46,7 +47,6 @@ Resources:
       VpcId: !Ref VPC
       InternetGatewayId: !Ref InternetGateway
 
-  # ── Subredes públicas ──
   PublicSubnetAZ1:
     Type: AWS::EC2::Subnet
     Properties:
@@ -77,7 +77,6 @@ Resources:
         - Key: kubernetes.io/role/elb
           Value: "1"
 
-  # ── Subredes privadas ──
   PrivateSubnetAZ1:
     Type: AWS::EC2::Subnet
     Properties:
@@ -108,38 +107,26 @@ Resources:
         - Key: kubernetes.io/role/internal-elb
           Value: "1"
 
-  # ── NAT Gateways ──
-  EipNatAZ1:
+  # Un solo NAT Gateway en AZ1 - ahorro de creditos Academy
+  EipNat:
     Type: AWS::EC2::EIP
     DependsOn: AttachIGW
     Properties:
       Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-eip-nat"
 
-  EipNatAZ2:
-    Type: AWS::EC2::EIP
-    DependsOn: AttachIGW
-    Properties:
-      Domain: vpc
-
-  NatGatewayAZ1:
+  NatGateway:
     Type: AWS::EC2::NatGateway
     Properties:
-      AllocationId: !GetAtt EipNatAZ1.AllocationId
+      AllocationId: !GetAtt EipNat.AllocationId
       SubnetId: !Ref PublicSubnetAZ1
       Tags:
         - Key: Name
-          Value: !Sub "${ProjectName}-nat-az1"
+          Value: !Sub "${ProjectName}-nat"
 
-  NatGatewayAZ2:
-    Type: AWS::EC2::NatGateway
-    Properties:
-      AllocationId: !GetAtt EipNatAZ2.AllocationId
-      SubnetId: !Ref PublicSubnetAZ2
-      Tags:
-        - Key: Name
-          Value: !Sub "${ProjectName}-nat-az2"
-
-  # ── Tablas de ruteo ──
+  # Tabla publica - IGW
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -168,49 +155,35 @@ Resources:
       SubnetId: !Ref PublicSubnetAZ2
       RouteTableId: !Ref PublicRouteTable
 
-  PrivateRouteTableAZ1:
+  # Tabla privada compartida - ambas AZ usan el mismo NAT
+  PrivateRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: !Sub "${ProjectName}-rtb-private-az1"
+          Value: !Sub "${ProjectName}-rtb-private"
 
-  PrivateRouteAZ1:
+  PrivateRoute:
     Type: AWS::EC2::Route
     Properties:
-      RouteTableId: !Ref PrivateRouteTableAZ1
+      RouteTableId: !Ref PrivateRouteTable
       DestinationCidrBlock: "0.0.0.0/0"
-      NatGatewayId: !Ref NatGatewayAZ1
+      NatGatewayId: !Ref NatGateway
 
   PrivSubAZ1Assoc:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PrivateSubnetAZ1
-      RouteTableId: !Ref PrivateRouteTableAZ1
-
-  PrivateRouteTableAZ2:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref VPC
-      Tags:
-        - Key: Name
-          Value: !Sub "${ProjectName}-rtb-private-az2"
-
-  PrivateRouteAZ2:
-    Type: AWS::EC2::Route
-    Properties:
-      RouteTableId: !Ref PrivateRouteTableAZ2
-      DestinationCidrBlock: "0.0.0.0/0"
-      NatGatewayId: !Ref NatGatewayAZ2
+      RouteTableId: !Ref PrivateRouteTable
 
   PrivSubAZ2Assoc:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PrivateSubnetAZ2
-      RouteTableId: !Ref PrivateRouteTableAZ2
+      RouteTableId: !Ref PrivateRouteTable
 
-  # ── VPC Endpoint S3 (evita costo NAT para S3) ──
+  # VPC Endpoint S3 - trafico S3 no pasa por NAT
   S3VpcEndpoint:
     Type: AWS::EC2::VPCEndpoint
     Properties:
@@ -218,8 +191,7 @@ Resources:
       ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
       VpcEndpointType: Gateway
       RouteTableIds:
-        - !Ref PrivateRouteTableAZ1
-        - !Ref PrivateRouteTableAZ2
+        - !Ref PrivateRouteTable
 
 Outputs:
   VpcId:

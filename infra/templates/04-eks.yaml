@@ -1,0 +1,121 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  MyBookStore - Stack 04: EKS Cluster
+  Cluster Kubernetes en subredes privadas con node group managed.
+  Usa LabRole exclusivamente - compatible con AWS Academy.
+  Sin creacion de IAM Roles custom.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: bookstore
+
+  KubernetesVersion:
+    Type: String
+    Default: "1.31"
+    AllowedValues: ["1.30", "1.31"]
+    Description: Version Kubernetes compatible con AWS Academy 2024-2025.
+
+  NodeInstanceType:
+    Type: String
+    Default: t3.medium
+
+  NodeMinSize:
+    Type: Number
+    Default: 2
+
+  NodeMaxSize:
+    Type: Number
+    Default: 4
+
+  NodeDesiredSize:
+    Type: Number
+    Default: 2
+
+  # LabRole ARN - formato estandar AWS Academy
+  # Reemplaza ACCOUNT_ID con el ID de tu cuenta Academy
+  LabRoleArn:
+    Type: String
+    Description: >
+      ARN del LabRole de AWS Academy.
+      Formato: arn:aws:iam::<ACCOUNT_ID>:role/LabRole
+      Consulta en IAM > Roles > LabRole de tu cuenta Academy.
+
+Resources:
+
+  # EKS Cluster usando LabRole
+  EKSCluster:
+    Type: AWS::EKS::Cluster
+    Properties:
+      Name: !Sub "${ProjectName}-cluster"
+      Version: !Ref KubernetesVersion
+      # LabRole como rol del plano de control
+      RoleArn: !Ref LabRoleArn
+      ResourcesVpcConfig:
+        SubnetIds:
+          - !ImportValue
+            Fn::Sub: "${ProjectName}-PrivateSubnetAZ1Id"
+          - !ImportValue
+            Fn::Sub: "${ProjectName}-PrivateSubnetAZ2Id"
+          - !ImportValue
+            Fn::Sub: "${ProjectName}-PublicSubnetAZ1Id"
+          - !ImportValue
+            Fn::Sub: "${ProjectName}-PublicSubnetAZ2Id"
+        SecurityGroupIds:
+          - !ImportValue
+            Fn::Sub: "${ProjectName}-SGEksId"
+        # EndpointPublicAccess true para kubectl desde maquina local
+        EndpointPublicAccess: true
+        EndpointPrivateAccess: true
+      Logging:
+        ClusterLogging:
+          EnabledTypes:
+            - Type: api
+            - Type: audit
+
+  # Node Group usando LabRole como NodeRole
+  EKSNodeGroup:
+    Type: AWS::EKS::Nodegroup
+    DependsOn: EKSCluster
+    Properties:
+      ClusterName: !Ref EKSCluster
+      NodegroupName: !Sub "${ProjectName}-node-group"
+      # LabRole como rol de los worker nodes
+      NodeRole: !Ref LabRoleArn
+      InstanceTypes:
+        - !Ref NodeInstanceType
+      # AMI Amazon Linux 2023 x86_64 - compatible con K8s 1.30/1.31
+      AmiType: AL2023_x86_64_STANDARD
+      ScalingConfig:
+        MinSize: !Ref NodeMinSize
+        MaxSize: !Ref NodeMaxSize
+        DesiredSize: !Ref NodeDesiredSize
+      Subnets:
+        - !ImportValue
+          Fn::Sub: "${ProjectName}-PrivateSubnetAZ1Id"
+        - !ImportValue
+          Fn::Sub: "${ProjectName}-PrivateSubnetAZ2Id"
+      Labels:
+        project: !Ref ProjectName
+      Tags:
+        Name: !Sub "${ProjectName}-node-group"
+
+Outputs:
+  ClusterName:
+    Value: !Ref EKSCluster
+    Export:
+      Name: !Sub "${ProjectName}-ClusterName"
+
+  ClusterEndpoint:
+    Value: !GetAtt EKSCluster.Endpoint
+    Export:
+      Name: !Sub "${ProjectName}-ClusterEndpoint"
+
+  ClusterArn:
+    Value: !GetAtt EKSCluster.Arn
+    Export:
+      Name: !Sub "${ProjectName}-ClusterArn"
+
+  KubeconfigCommand:
+    Description: Ejecuta este comando para configurar kubectl localmente
+    Value: !Sub "aws eks update-kubeconfig --name ${ProjectName}-cluster --region ${AWS::Region}"

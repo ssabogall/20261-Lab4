@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: auth-service
-          image: 261273955683.dkr.ecr.us-east-1.amazonaws.com/bookstore-auth-service:latest
+          image: <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/bookstore-auth-service:latest
           ports:
             - containerPort: 5002
           env:

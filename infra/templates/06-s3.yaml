@@ -1,30 +1,21 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  MyBookStore — Stack 07: S3 Buckets
-  Bucket de objetos (portadas de libros, trigger para Lambda procesarPortada)
-  y bucket de frontend (React build estático, solo lectura via CloudFront OAC).
+  MyBookStore - Stack 06: S3 Buckets
+  Bucket de objetos (portadas de libros) y bucket frontend (React build).
+  OAC para acceso CloudFront a S3 sin credenciales publicas.
 
 Parameters:
   ProjectName:
     Type: String
     Default: bookstore
 
-  # Los nombres de bucket S3 deben ser globalmente únicos.
-  # Se agrega el AccountId para garantizarlo.
-  AccountId:
-    Type: String
-    Default: ""
-    Description: >
-      Tu AWS Account ID. Déjalo vacío para usar !Sub con AWS::AccountId.
-
 Resources:
 
-  # ── Bucket de objetos (portadas de libros) ──
+  # Bucket de objetos - portadas de libros
   ObjectsBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub "${ProjectName}-objects-${AWS::AccountId}"
-      # Bloquear acceso público — CloudFront accede via OAC
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -35,15 +26,13 @@ Resources:
           - AllowedMethods: [GET]
             AllowedOrigins: ["*"]
             AllowedHeaders: ["*"]
-      # Notificación para Lambda procesarPortada
-      # Se conecta en el stack 09-lambda.yaml para evitar dependencia circular
       Tags:
         - Key: Project
           Value: !Ref ProjectName
         - Key: Name
           Value: !Sub "${ProjectName}-objects"
 
-  # ── Bucket del frontend (React build) ──
+  # Bucket frontend - React build estatico
   FrontendBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -59,7 +48,7 @@ Resources:
         - Key: Name
           Value: !Sub "${ProjectName}-frontend"
 
-  # ── OAC (Origin Access Control) para CloudFront → S3 ──
+  # OAC para CloudFront - acceso seguro a S3 sin hacer bucket publico
   CloudFrontOAC:
     Type: AWS::CloudFront::OriginAccessControl
     Properties:
@@ -69,12 +58,13 @@ Resources:
         SigningBehavior: always
         SigningProtocol: sigv4
 
-  # Política del bucket frontend — solo CloudFront puede leer
+  # Politica bucket frontend - solo CloudFront con OAC puede leer
   FrontendBucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
       Bucket: !Ref FrontendBucket
       PolicyDocument:
+        Version: "2012-10-17"
         Statement:
           - Sid: AllowCloudFrontOAC
             Effect: Allow

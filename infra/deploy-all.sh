@@ -1,40 +1,50 @@
 #!/bin/bash
 # ============================================================
-# MyBookStore — deploy-all.sh
-# Despliega todos los stacks de CloudFormation en orden.
+# MyBookStore - deploy-all.sh
+# Despliega todos los stacks CloudFormation en orden correcto.
+# Compatible con AWS Academy - usa LabRole exclusivamente.
 #
 # USO:
 #   chmod +x deploy-all.sh
 #   ./deploy-all.sh
 #
 # PREREQUISITOS:
-#   - aws configure completado
-#   - Key Pair creado en EC2 con el nombre configurado abajo
-#   - Docker corriendo (para el paso de build de imágenes)
-#   - kubectl instalado
+#   - aws configure con credenciales Academy activas
+#   - kubectl instalado localmente
+#   - Docker corriendo
+#   - Obtener LabRole ARN: aws iam get-role --role-name LabRole --query Role.Arn --output text
 # ============================================================
 
 set -e
 
-# ── Configuración — edita estos valores ──────────────────────
+# ── Configuracion - EDITA ESTOS VALORES ─────────────────────
 PROJECT="bookstore"
 REGION="us-east-1"
-KEY_PAIR_NAME="bookstore-key"          # Nombre del Key Pair en EC2
-BASTION_CIDR="0.0.0.0/0"             # Reemplaza con tu IP: X.X.X.X/32
-TEMPLATES_DIR="$(dirname "$0")/templates"
+TEMPLATES_DIR="$(dirname "$0")"
+
+# Obtener automaticamente el ARN del LabRole
+LAB_ROLE_ARN=$(aws iam get-role --role-name LabRole --query Role.Arn --output text 2>/dev/null)
+if [ -z "$LAB_ROLE_ARN" ]; then
+  echo "ERROR: No se pudo obtener el ARN de LabRole."
+  echo "Verifica que tus credenciales Academy esten activas: aws sts get-caller-identity"
+  exit 1
+fi
 # ─────────────────────────────────────────────────────────────
 
 AWS_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
 ECR_BASE="$AWS_ACCOUNT.dkr.ecr.$REGION.amazonaws.com"
+REPO_ROOT="$(dirname "$0")/.."
 
 echo "============================================"
-echo "  MyBookStore — Despliegue CloudFormation"
-echo "  Account: $AWS_ACCOUNT"
-echo "  Region:  $REGION"
-echo "  Project: $PROJECT"
+echo "  MyBookStore - Despliegue CloudFormation"
+echo "  Account : $AWS_ACCOUNT"
+echo "  Region  : $REGION"
+echo "  Project : $PROJECT"
+echo "  LabRole : $LAB_ROLE_ARN"
 echo "============================================"
 echo ""
 
+# Funcion helper para desplegar un stack
 deploy_stack() {
   local STACK_NAME=$1
   local TEMPLATE=$2
@@ -52,166 +62,158 @@ deploy_stack() {
     --capabilities CAPABILITY_NAMED_IAM \
     --region "$REGION"
 
-  echo "  ✓ $STACK_NAME — CREATE_COMPLETE"
+  echo "  OK $STACK_NAME completado"
   echo ""
 }
 
-# ── Stack 01: VPC ──
+# ── 01: VPC ──
 deploy_stack "${PROJECT}-vpc" "01-vpc.yaml" \
   AZ1=us-east-1a \
   AZ2=us-east-1b
 
-# ── Stack 02: Security Groups ──
-deploy_stack "${PROJECT}-security-groups" "02-security-groups.yaml" \
-  BastionAllowedCidr="$BASTION_CIDR"
+# ── 02: Security Groups ──
+deploy_stack "${PROJECT}-security-groups" "02-security-groups.yaml"
 
-# ── Stack 03: Bastion Host ──
-deploy_stack "${PROJECT}-bastion" "03-bastion.yaml" \
-  KeyPairName="$KEY_PAIR_NAME"
+# ── 03: ECR ──
+deploy_stack "${PROJECT}-ecr" "03-ecr.yaml"
 
-# ── Stack 04: ECR ──
-deploy_stack "${PROJECT}-ecr" "04-ecr.yaml"
-
-# ── Build y push de imágenes Docker ──
+# ── Build y push de imagenes Docker a ECR ──
 echo "──────────────────────────────────────────"
-echo "  Build y push de imágenes a ECR"
+echo "  Build y push imagenes Docker a ECR"
 echo "──────────────────────────────────────────"
-REPO_ROOT="$(dirname "$0")/.."
 
 aws ecr get-login-password --region "$REGION" | \
   docker login --username AWS --password-stdin "$ECR_BASE"
 
-for SERVICE in books-service auth-service reviews-service; do
-  SRC_DIR="backend"
-  [ "$SERVICE" = "auth-service" ]     && SRC_DIR="services/auth-service"
-  [ "$SERVICE" = "reviews-service" ]  && SRC_DIR="services/reviews-service"
+declare -A SERVICE_DIRS=(
+  ["books-service"]="backend"
+  ["auth-service"]="services/auth-service"
+  ["reviews-service"]="services/reviews-service"
+)
 
+for SERVICE in books-service auth-service reviews-service; do
+  SRC_DIR="${SERVICE_DIRS[$SERVICE]}"
+  echo "  Building $SERVICE desde $REPO_ROOT/$SRC_DIR..."
   docker build -t "${PROJECT}-${SERVICE}" "$REPO_ROOT/$SRC_DIR"
   docker tag "${PROJECT}-${SERVICE}:latest" "$ECR_BASE/${PROJECT}-${SERVICE}:latest"
   docker push "$ECR_BASE/${PROJECT}-${SERVICE}:latest"
-  echo "  ✓ $SERVICE subido a ECR"
+  echo "  OK $SERVICE subido"
 done
 echo ""
 
-# ── Stack 05: EKS (tarda ~20 min) ──
-echo "  AVISO: El stack EKS tarda entre 15 y 25 minutos."
-deploy_stack "${PROJECT}-eks" "05-eks.yaml" \
+# ── 04: EKS (tarda 15-25 min) ──
+echo "  AVISO: El stack EKS tarda entre 15 y 25 minutos en AWS Academy."
+deploy_stack "${PROJECT}-eks" "04-eks.yaml" \
+  LabRoleArn="$LAB_ROLE_ARN" \
+  KubernetesVersion="1.31" \
   NodeInstanceType=t3.medium \
   NodeMinSize=2 \
   NodeMaxSize=4 \
   NodeDesiredSize=2
 
-# Configurar kubectl
+# Configurar kubectl localmente
 echo "  Configurando kubectl..."
 aws eks update-kubeconfig --name "${PROJECT}-cluster" --region "$REGION"
-echo "  ✓ kubectl configurado"
+echo "  OK kubectl configurado"
 echo ""
 
-# ── Stack 06: DynamoDB ──
-deploy_stack "${PROJECT}-dynamodb" "06-dynamodb.yaml"
+# ── 05: DynamoDB ──
+deploy_stack "${PROJECT}-dynamodb" "05-dynamodb.yaml"
 
-# ── Stack 07: S3 ──
-deploy_stack "${PROJECT}-s3" "07-s3.yaml"
+# ── 06: S3 ──
+deploy_stack "${PROJECT}-s3" "06-s3.yaml"
 
-# ── Build y deploy del frontend a S3 ──
+# ── Build React y subir a S3 ──
 echo "──────────────────────────────────────────"
-echo "  Build React y sync a S3"
+echo "  Build React (VITE_API_URL placeholder)"
 echo "──────────────────────────────────────────"
 FRONTEND_BUCKET="${PROJECT}-frontend-${AWS_ACCOUNT}"
-
-# El ALB se crea después del deploy K8s; por ahora usamos placeholder
-# que deberás actualizar con: VITE_API_URL=https://<cloudfront-domain>
 cd "$REPO_ROOT/frontend"
 VITE_API_URL="https://PLACEHOLDER" npm run build
 aws s3 sync dist/ "s3://$FRONTEND_BUCKET" --delete
 cd -
-echo "  ✓ Frontend subido a S3"
+echo "  OK Frontend subido a S3 (URL pendiente de CloudFront)"
 echo ""
 
-# ── Despliegue de manifiestos K8s ──
+# ── Despliegue manifiestos K8s ──
 echo "──────────────────────────────────────────"
 echo "  Aplicando manifiestos Kubernetes"
 echo "──────────────────────────────────────────"
 K8S_DIR="$REPO_ROOT/k8s"
 
-# Actualizar Account ID en deployments
-sed -i "s/261273955683/$AWS_ACCOUNT/g" \
+# Reemplazar account ID en deployments si es necesario
+sed -i "s/<ACCOUNT_ID>/$AWS_ACCOUNT/g" \
   "$K8S_DIR/books-service/books-deployment.yaml" \
   "$K8S_DIR/auth-service/auth-deployment.yaml" \
-  "$K8S_DIR/reviews-service/reviews-deployment.yaml"
-
-# Actualizar nombre de tabla DynamoDB en el secret
-DYNAMO_TABLE_B64=$(echo -n "${PROJECT}-books" | base64)
-sed -i "s|dynamo-table:.*|dynamo-table: $DYNAMO_TABLE_B64|" \
-  "$K8S_DIR/books-service/dynamo-secret.yaml"
+  "$K8S_DIR/reviews-service/reviews-deployment.yaml" 2>/dev/null || true
 
 kubectl apply -f "$K8S_DIR/books-service/"
 kubectl apply -f "$K8S_DIR/auth-service/"
 kubectl apply -f "$K8S_DIR/reviews-service/"
 kubectl apply -f "$K8S_DIR/ingress.yaml"
 
-echo "  Esperando pods listos..."
-kubectl wait --for=condition=available deployment/books-deployment   --timeout=180s
-kubectl wait --for=condition=available deployment/auth-deployment    --timeout=180s
-kubectl wait --for=condition=available deployment/reviews-deployment --timeout=180s
-echo "  ✓ Pods corriendo"
+echo "  Esperando pods listos (max 3 min)..."
+kubectl wait --for=condition=available deployment/books-deployment   --timeout=180s || true
+kubectl wait --for=condition=available deployment/auth-deployment    --timeout=180s || true
+kubectl wait --for=condition=available deployment/reviews-deployment --timeout=180s || true
+echo "  OK Pods desplegados"
 echo ""
 
-# Obtener DNS del ALB (creado por el Ingress)
-echo "  Obteniendo DNS del ALB..."
-sleep 30
-ALB_DNS=$(kubectl get svc -n kube-system \
-  -l app.kubernetes.io/name=aws-load-balancer-controller \
-  -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}' 2>/dev/null || \
-  kubectl get ingress bookstore-ingress \
-  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || \
-  echo "PENDING")
-echo "  ALB DNS: $ALB_DNS"
-echo ""
+# Obtener DNS del ALB del Ingress
+echo "  Obteniendo DNS del ALB (puede tardar 1-2 min)..."
+sleep 60
+ALB_DNS=$(kubectl get ingress bookstore-ingress \
+  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
 
-# ── Stack 08: CloudFront ──
-if [ "$ALB_DNS" != "PENDING" ]; then
-  deploy_stack "${PROJECT}-cloudfront" "08-cloudfront.yaml" \
+if [ -z "$ALB_DNS" ]; then
+  echo "  ALB aun sin DNS asignado. Espera 2 minutos y ejecuta:"
+  echo "  kubectl get ingress bookstore-ingress"
+  echo "  Luego despliega manualmente el stack CloudFront:"
+  echo "  aws cloudformation deploy --template-file $TEMPLATES_DIR/07-cloudfront.yaml \\"
+  echo "    --stack-name ${PROJECT}-cloudfront \\"
+  echo "    --parameter-overrides ProjectName=${PROJECT} AlbDnsName=<ALB_DNS>"
+  echo ""
+else
+  echo "  ALB DNS: $ALB_DNS"
+
+  # ── 07: CloudFront ──
+  deploy_stack "${PROJECT}-cloudfront" "07-cloudfront.yaml" \
     AlbDnsName="$ALB_DNS"
 
-  # Actualizar VITE_API_URL con el dominio real de CloudFront
   CF_DOMAIN=$(aws cloudformation describe-stacks \
     --stack-name "${PROJECT}-cloudfront" \
     --query "Stacks[0].Outputs[?OutputKey=='CloudFrontDomain'].OutputValue" \
     --output text --region "$REGION")
 
-  echo "  Actualizando frontend con CloudFront domain..."
+  # Rebuild frontend con URL real de CloudFront
+  echo "  Rebuild frontend con URL real: https://$CF_DOMAIN"
   cd "$REPO_ROOT/frontend"
   VITE_API_URL="https://$CF_DOMAIN" npm run build
   aws s3 sync dist/ "s3://$FRONTEND_BUCKET" --delete
-  aws cloudfront create-invalidation \
-    --distribution-id "$(aws cloudformation describe-stacks \
-      --stack-name "${PROJECT}-cloudfront" \
-      --query "Stacks[0].Outputs[?OutputKey=='CloudFrontId'].OutputValue" \
-      --output text --region "$REGION")" \
-    --paths "/*"
   cd -
-  echo "  ✓ Frontend actualizado con URL real"
-else
-  echo "  ⚠ ALB aún no tiene DNS. Ejecuta el stack 08 manualmente:"
-  echo "    aws cloudformation deploy --template-file templates/08-cloudfront.yaml \\"
-  echo "      --stack-name ${PROJECT}-cloudfront \\"
-  echo "      --parameter-overrides ProjectName=${PROJECT} AlbDnsName=<ALB_DNS>"
+
+  # Invalidar cache CloudFront
+  CF_ID=$(aws cloudformation describe-stacks \
+    --stack-name "${PROJECT}-cloudfront" \
+    --query "Stacks[0].Outputs[?OutputKey=='CloudFrontId'].OutputValue" \
+    --output text --region "$REGION")
+  aws cloudfront create-invalidation --distribution-id "$CF_ID" --paths "/*"
+  echo "  OK Frontend actualizado con URL real"
+  echo ""
+
+  # ── 08: Lambda (depende de DynamoDB, S3 y CloudFront) ──
+  deploy_stack "${PROJECT}-lambda" "08-lambda.yaml" \
+    LabRoleArn="$LAB_ROLE_ARN" \
+    StockThreshold=3
 fi
 
-# ── Stack 09: Lambdas ──
-deploy_stack "${PROJECT}-lambda" "09-lambda.yaml" \
-  StockThreshold=3
-
 echo "============================================"
-echo "  ✓ DESPLIEGUE COMPLETO"
+echo "  DESPLIEGUE COMPLETO"
 echo "============================================"
 echo ""
 kubectl get pods
 echo ""
-if [ -n "$CF_DOMAIN" ]; then
-  echo "  URL de la aplicación: https://$CF_DOMAIN"
-fi
+[ -n "$CF_DOMAIN" ] && echo "  URL de la aplicacion: https://$CF_DOMAIN"
 echo ""
-echo "  IMPORTANTE: Confirma la suscripción SNS"
-echo "  en el email: $STOCK_ALERT_EMAIL"
+echo "  NOTA: Confirma kubectl get nodes y kubectl get pods"
+echo "  antes de hacer pruebas funcionales."

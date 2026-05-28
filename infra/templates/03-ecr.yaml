@@ -1,8 +1,8 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  MyBookStore — Stack 04: ECR Repositories
-  Crea los 3 repositorios ECR para los microservicios.
-  El frontend ya no tiene imagen Docker (va a S3).
+  MyBookStore - Stack 03: ECR Repositories
+  3 repositorios para los microservicios Node.js.
+  Sin IAM Roles custom - compatible con AWS Academy LabRole.
 
 Parameters:
   ProjectName:
@@ -22,7 +22,7 @@ Resources:
           {
             "rules": [{
               "rulePriority": 1,
-              "description": "Mantener solo las 5 imagenes mas recientes",
+              "description": "Mantener las 5 imagenes mas recientes",
               "selection": {
                 "tagStatus": "any",
                 "countType": "imageCountMoreThan",
@@ -46,7 +46,7 @@ Resources:
           {
             "rules": [{
               "rulePriority": 1,
-              "description": "Mantener solo las 5 imagenes mas recientes",
+              "description": "Mantener las 5 imagenes mas recientes",
               "selection": {
                 "tagStatus": "any",
                 "countType": "imageCountMoreThan",
@@ -70,7 +70,7 @@ Resources:
           {
             "rules": [{
               "rulePriority": 1,
-              "description": "Mantener solo las 5 imagenes mas recientes",
+              "description": "Mantener las 5 imagenes mas recientes",
               "selection": {
                 "tagStatus": "any",
                 "countType": "imageCountMoreThan",

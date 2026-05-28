@@ -1,0 +1,204 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  MyBookStore - Stack 08: Lambda Functions
+  Lambda 1: procesarPortada - trigger S3 ObjectCreated, procesa imagen.
+  Lambda 2: actualizarStockBajo - trigger DynamoDB Streams,
+            actualiza campo lowStock=true en DynamoDB.
+            Sin SNS. Sin email. Sin IAM Roles custom.
+            Usa LabRole exclusivamente.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: bookstore
+
+  LabRoleArn:
+    Type: String
+    Description: >
+      ARN del LabRole de AWS Academy.
+      Formato: arn:aws:iam::<ACCOUNT_ID>:role/LabRole
+
+  StockThreshold:
+    Type: Number
+    Default: 3
+    Description: Umbral de stock bajo. Lambda actualiza lowStock cuando countInStock <= este valor.
+
+Resources:
+
+  # Lambda 1: procesarPortada
+  # Trigger: S3 ObjectCreated en covers/raw/
+  # Accion: descarga imagen, la sube procesada a covers/processed/, actualiza book.image en DynamoDB
+  LambdaProcesarPortada:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-procesarPortada"
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !Ref LabRoleArn
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          DYNAMO_TABLE: !ImportValue
+            Fn::Sub: "${ProjectName}-BooksTableName"
+          CDN_DOMAIN: !ImportValue
+            Fn::Sub: "${ProjectName}-CloudFrontDomain"
+          AWS_NODEJS_CONNECTION_REUSE_ENABLED: "1"
+      Code:
+        ZipFile: |
+          const { S3Client, GetObjectCommand, PutObjectCommand } = require("@aws-sdk/client-s3");
+          const { DynamoDBClient, UpdateItemCommand } = require("@aws-sdk/client-dynamodb");
+
+          const s3 = new S3Client({});
+          const dynamo = new DynamoDBClient({});
+
+          exports.handler = async (event) => {
+            const record = event.Records[0];
+            const bucket = record.s3.bucket.name;
+            const key = decodeURIComponent(record.s3.object.key.replace(/\+/g, " "));
+
+            // Extraer bookId del nombre: covers/raw/BOOK_ID.jpg
+            const fileName = key.split("/").pop();
+            const bookId = fileName.split(".")[0];
+
+            console.log(`Procesando portada: bucket=${bucket} key=${key} bookId=${bookId}`);
+
+            // 1. Descargar imagen original
+            const { Body } = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+            const chunks = [];
+            for await (const chunk of Body) chunks.push(chunk);
+            const imageBuffer = Buffer.concat(chunks);
+
+            // 2. Subir imagen procesada (Sharp requiere deployment package con dependencias nativas)
+            const processedKey = `covers/processed/${bookId}.jpg`;
+            await s3.send(new PutObjectCommand({
+              Bucket: bucket,
+              Key: processedKey,
+              Body: imageBuffer,
+              ContentType: "image/jpeg",
+            }));
+
+            // 3. Actualizar book.image en DynamoDB con URL de CloudFront
+            const imageUrl = `https://${process.env.CDN_DOMAIN}/${processedKey}`;
+            await dynamo.send(new UpdateItemCommand({
+              TableName: process.env.DYNAMO_TABLE,
+              Key: { id: { S: bookId } },
+              UpdateExpression: "SET image = :url",
+              ExpressionAttributeValues: { ":url": { S: imageUrl } },
+            }));
+
+            console.log(`Portada procesada: ${imageUrl}`);
+            return { statusCode: 200, body: imageUrl };
+          };
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # Permiso para que S3 invoque Lambda 1
+  LambdaS3Permission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt LambdaProcesarPortada.Arn
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !ImportValue
+        Fn::Sub: "${ProjectName}-ObjectsBucketArn"
+
+  # Lambda 2: actualizarStockBajo
+  # Trigger: DynamoDB Streams tabla books
+  # Accion: si countInStock <= threshold Y lowStock no cambia => actualiza lowStock en DynamoDB
+  # Logica anti-loop: evita re-procesar si lowStock ya tiene el valor correcto
+  LambdaActualizarStock:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-actualizarStockBajo"
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !Ref LabRoleArn
+      Timeout: 15
+      MemorySize: 128
+      Environment:
+        Variables:
+          DYNAMO_TABLE: !ImportValue
+            Fn::Sub: "${ProjectName}-BooksTableName"
+          STOCK_THRESHOLD: !Sub "${StockThreshold}"
+      Code:
+        ZipFile: |
+          const { DynamoDBClient, UpdateItemCommand } = require("@aws-sdk/client-dynamodb");
+          const dynamo = new DynamoDBClient({});
+          const THRESHOLD = parseInt(process.env.STOCK_THRESHOLD || "3");
+
+          exports.handler = async (event) => {
+            for (const record of event.Records) {
+
+              // Solo procesar INSERT y MODIFY - ignorar REMOVE
+              if (record.eventName === "REMOVE") continue;
+
+              const newImage = record.dynamodb.NewImage;
+              const oldImage = record.dynamodb.OldImage;
+
+              if (!newImage || !newImage.countInStock) continue;
+
+              const newStock = parseInt(newImage.countInStock.N || "0");
+              const newLowStock = newStock <= THRESHOLD;
+
+              // Anti-loop: si lowStock ya tiene el valor correcto, no hacer nada
+              // Esto evita que la propia escritura de Lambda vuelva a disparar el trigger
+              const oldLowStock = oldImage?.lowStock?.BOOL;
+              if (oldLowStock === newLowStock) {
+                console.log(`Sin cambio en lowStock para id=${newImage.id?.S}. Ignorando.`);
+                continue;
+              }
+
+              const bookId = newImage.id?.S;
+              if (!bookId) continue;
+
+              console.log(`Actualizando lowStock=${newLowStock} para bookId=${bookId} (stock=${newStock})`);
+
+              // Actualizar campo lowStock en DynamoDB
+              await dynamo.send(new UpdateItemCommand({
+                TableName: process.env.DYNAMO_TABLE,
+                Key: { id: { S: bookId } },
+                UpdateExpression: "SET lowStock = :ls",
+                ExpressionAttributeValues: {
+                  ":ls": { BOOL: newLowStock },
+                },
+                // Condicion extra: evitar escritura si ya es el mismo valor
+                ConditionExpression: "attribute_not_exists(lowStock) OR lowStock <> :ls",
+              }));
+
+              console.log(`lowStock actualizado para ${bookId}`);
+            }
+
+            return { statusCode: 200 };
+          };
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # Trigger: DynamoDB Stream -> Lambda 2
+  LambdaDynamoTrigger:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      FunctionName: !GetAtt LambdaActualizarStock.Arn
+      EventSourceArn: !ImportValue
+        Fn::Sub: "${ProjectName}-BooksTableStreamArn"
+      StartingPosition: LATEST
+      BatchSize: 10
+      # Si falla un batch, divide en dos para aislar el registro problematico
+      BisectBatchOnFunctionError: true
+      # Filtro: solo procesar eventos que cambien countInStock
+      FilterCriteria:
+        Filters:
+          - Pattern: '{"eventName": ["INSERT", "MODIFY"]}'
+
+Outputs:
+  LambdaProcesarPortadaArn:
+    Value: !GetAtt LambdaProcesarPortada.Arn
+    Export:
+      Name: !Sub "${ProjectName}-LambdaProcesarPortadaArn"
+
+  LambdaActualizarStockArn:
+    Value: !GetAtt LambdaActualizarStock.Arn
+    Export:
+      Name: !Sub "${ProjectName}-LambdaActualizarStockArn"

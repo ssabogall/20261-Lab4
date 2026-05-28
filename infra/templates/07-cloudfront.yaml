@@ -1,8 +1,8 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  MyBookStore — Stack 08: CloudFront
-  Distribución CDN con dos origins: S3 frontend (/) y ALB (/api/*).
-  Certificado ACM en us-east-1 (requerido por CloudFront).
+  MyBookStore - Stack 07: CloudFront
+  Distribucion CDN con dos origins: S3 frontend (/) y ALB (/api/*).
+  NOTA: AlbDnsName se obtiene despues de kubectl apply del ingress.
 
 Parameters:
   ProjectName:
@@ -12,8 +12,8 @@ Parameters:
   AlbDnsName:
     Type: String
     Description: >
-      DNS del ALB creado por el frontend-service de EKS.
-      Obtenerlo con: kubectl get svc frontend-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+      DNS del ALB creado por EKS Ingress.
+      Obtener con: kubectl get ingress bookstore-ingress -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
 
 Resources:
 
@@ -21,14 +21,14 @@ Resources:
     Type: AWS::CloudFront::Distribution
     Properties:
       DistributionConfig:
-        Comment: !Sub "${ProjectName} - Frontend S3 + API ALB"
+        Comment: !Sub "${ProjectName} Frontend S3 + API ALB"
         Enabled: true
         DefaultRootObject: index.html
         HttpVersion: http2
         PriceClass: PriceClass_100
 
         Origins:
-          # Origin 1: S3 Frontend (archivos estáticos React)
+          # Origin 1: S3 bucket frontend con OAC
           - Id: S3FrontendOrigin
             DomainName: !Sub
               - "${BucketName}.s3.${AWS::Region}.amazonaws.com"
@@ -39,7 +39,7 @@ Resources:
             OriginAccessControlId: !ImportValue
               Fn::Sub: "${ProjectName}-CloudFrontOACId"
 
-          # Origin 2: ALB (microservicios /api/*)
+          # Origin 2: ALB microservicios /api/*
           - Id: ALBOrigin
             DomainName: !Ref AlbDnsName
             CustomOriginConfig:
@@ -47,25 +47,26 @@ Resources:
               HTTPSPort: 443
               OriginProtocolPolicy: http-only
 
-        # Comportamientos de caché
         CacheBehaviors:
-          # /api/* → ALB sin caché
+          # /api/* va al ALB sin cache
           - PathPattern: "/api/*"
             TargetOriginId: ALBOrigin
             ViewerProtocolPolicy: redirect-to-https
-            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # CachingDisabled
+            # CachingDisabled policy ID
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
             CachedMethods: [GET, HEAD]
 
-        # Comportamiento por defecto → S3 (React)
+        # Default: S3 React build
         DefaultCacheBehavior:
           TargetOriginId: S3FrontendOrigin
           ViewerProtocolPolicy: redirect-to-https
-          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # CachingOptimized
+          # CachingOptimized policy ID
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
           AllowedMethods: [GET, HEAD]
           CachedMethods: [GET, HEAD]
 
-        # SPA: redirigir 403/404 a index.html para React Router
+        # SPA fallback - React Router necesita esto
         CustomErrorResponses:
           - ErrorCode: 403
             ResponseCode: 200
@@ -80,7 +81,7 @@ Resources:
 
 Outputs:
   CloudFrontDomain:
-    Description: Dominio de la distribución CloudFront
+    Description: Dominio publico de la aplicacion
     Value: !GetAtt CloudFrontDistribution.DomainName
     Export:
       Name: !Sub "${ProjectName}-CloudFrontDomain"
@@ -90,6 +91,6 @@ Outputs:
     Export:
       Name: !Sub "${ProjectName}-CloudFrontId"
 
-  FrontendUrl:
-    Description: URL pública de la aplicación
+  AppUrl:
+    Description: URL publica de MyBookStore
     Value: !Sub "https://${CloudFrontDistribution.DomainName}"
