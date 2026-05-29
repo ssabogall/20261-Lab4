@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   MyBookStore - Stack 07: CloudFront
   Distribucion CDN con dos origins: S3 frontend (/) y ALB (/api/*).
-  NOTA: AlbDnsName se obtiene despues de kubectl apply del ingress.
+  SIN OAC — bucket S3 publico (compatible con AWS Academy / LabRole).
 
 Parameters:
   ProjectName:
@@ -28,15 +28,16 @@ Resources:
         PriceClass: PriceClass_100
 
         Origins:
-        # Origin 1: S3 bucket frontend
-        - Id: S3FrontendOrigin
-        DomainName: !Sub
-          - "${BucketName}.s3.${AWS::Region}.amazonaws.com"
-          - BucketName: !ImportValue
-            Fn::Sub: "${ProjectName}-FrontendBucketName"
-        S3OriginConfig: {}
+          # Origin 1: S3 bucket frontend publico
+          - Id: S3FrontendOrigin
+            DomainName: !Sub
+              - "${BucketName}.s3.${AWS::Region}.amazonaws.com"
+              - BucketName: !ImportValue
+                  Fn::Sub: "${ProjectName}-FrontendBucketName"
+            S3OriginConfig:
+              OriginAccessIdentity: ""
 
-          # Origin 2: ALB microservicios /api/*
+          # Origin 2: ALB — microservicios /api/*
           - Id: ALBOrigin
             DomainName: !Ref AlbDnsName
             CustomOriginConfig:
@@ -45,11 +46,10 @@ Resources:
               OriginProtocolPolicy: http-only
 
         CacheBehaviors:
-          # /api/* va al ALB sin cache
+          # /api/* sin cache → ALB
           - PathPattern: "/api/*"
             TargetOriginId: ALBOrigin
-            ViewerProtocolPolicy: redirect-to-https
-            # CachingDisabled policy ID
+            ViewerProtocolPolicy: allow-all
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
             CachedMethods: [GET, HEAD]
@@ -57,13 +57,12 @@ Resources:
         # Default: S3 React build
         DefaultCacheBehavior:
           TargetOriginId: S3FrontendOrigin
-          ViewerProtocolPolicy: redirect-to-https
-          # CachingOptimized policy ID
+          ViewerProtocolPolicy: allow-all
           CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
           AllowedMethods: [GET, HEAD]
           CachedMethods: [GET, HEAD]
 
-        # SPA fallback - React Router necesita esto
+        # SPA fallback — React Router
         CustomErrorResponses:
           - ErrorCode: 403
             ResponseCode: 200

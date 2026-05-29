@@ -14,7 +14,6 @@ spec:
     spec:
       containers:
         - name: books-service
-          # ACCOUNT_ID se reemplaza por deploy-all.sh antes de aplicar
           image: 261273955683.dkr.ecr.us-east-1.amazonaws.com/bookstore-books-service:latest
           ports:
             - containerPort: 5001
@@ -22,11 +21,32 @@ spec:
             - name: PORT
               value: "5001"
             - name: NODE_ENV
-              value: "production"
+              valueFrom:
+                secretKeyRef:
+                  name: aws-credentials
+                  key: NODE_ENV
             - name: AWS_REGION
-              value: "us-east-1"
+              valueFrom:
+                secretKeyRef:
+                  name: aws-credentials
+                  key: AWS_REGION
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aws-credentials
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aws-credentials
+                  key: AWS_SECRET_ACCESS_KEY
+            - name: AWS_SESSION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: aws-credentials
+                  key: AWS_SESSION_TOKEN
             - name: DYNAMO_TABLE
               valueFrom:
                 secretKeyRef:
-                  name: dynamo-secret
-                  key: dynamo-table
+                  name: aws-credentials
+                  key: DYNAMO_TABLE
