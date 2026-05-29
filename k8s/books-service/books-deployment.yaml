@@ -15,7 +15,7 @@ spec:
       containers:
         - name: books-service
           # ACCOUNT_ID se reemplaza por deploy-all.sh antes de aplicar
-          image: <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/bookstore-books-service:latest
+          image: 261273955683.dkr.ecr.us-east-1.amazonaws.com/bookstore-books-service:latest
           ports:
             - containerPort: 5001
           env:

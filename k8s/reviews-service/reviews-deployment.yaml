@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: reviews-service
-          image: <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/bookstore-reviews-service:latest
+          image: 261273955683.dkr.ecr.us-east-1.amazonaws.com/bookstore-reviews-service:latest
           ports:
             - containerPort: 5003
           env:

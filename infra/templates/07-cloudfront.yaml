@@ -28,16 +28,13 @@ Resources:
         PriceClass: PriceClass_100
 
         Origins:
-          # Origin 1: S3 bucket frontend con OAC
-          - Id: S3FrontendOrigin
-            DomainName: !Sub
-              - "${BucketName}.s3.${AWS::Region}.amazonaws.com"
-              - BucketName: !ImportValue
-                  Fn::Sub: "${ProjectName}-FrontendBucketName"
-            S3OriginConfig:
-              OriginAccessIdentity: ""
-            OriginAccessControlId: !ImportValue
-              Fn::Sub: "${ProjectName}-CloudFrontOACId"
+        # Origin 1: S3 bucket frontend
+        - Id: S3FrontendOrigin
+        DomainName: !Sub
+          - "${BucketName}.s3.${AWS::Region}.amazonaws.com"
+          - BucketName: !ImportValue
+            Fn::Sub: "${ProjectName}-FrontendBucketName"
+        S3OriginConfig: {}
 
           # Origin 2: ALB microservicios /api/*
           - Id: ALBOrigin
