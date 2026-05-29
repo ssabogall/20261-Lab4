@@ -22,12 +22,22 @@ const StockEditor = ({ bookId, currentStock, outOfStock, onUpdated }) => {
         setSaving(true);
         setSuccess(false);
         setError(null);
+    
         try {
-            const { data } = await api.put(`/api/books/${bookId}/stock`, {
+            // 1. Actualiza el stock en backend (DynamoDB)
+            await api.put(`/api/books/${bookId}/stock`, {
                 countInStock: stock,
             });
+        
+            // 2. Esperar a que DynamoDB Streams + Lambdas procesen lowStock/outOfStock
+            await new Promise(resolve => setTimeout(resolve, 1500));
+        
+            // 3. Volver a consultar el libro ya con estado consistente
+            const { data: updatedBook } = await api.get(`/api/books/${bookId}`);
+        
             setSuccess(true);
-            onUpdated(data);
+            onUpdated(updatedBook);
+        
             setTimeout(() => setSuccess(false), 3000);
         } catch (err) {
             setError("No se pudo actualizar el stock.");
@@ -35,7 +45,7 @@ const StockEditor = ({ bookId, currentStock, outOfStock, onUpdated }) => {
             setSaving(false);
         }
     };
-
+    
     const dirty = stock !== currentStock;
 
     return (
