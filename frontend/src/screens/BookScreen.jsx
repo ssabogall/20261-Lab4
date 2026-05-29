@@ -3,15 +3,13 @@ import { api } from '../lib/api';
 import { Link, useParams } from 'react-router-dom';
 import { Row, Col, Image, ListGroup, Badge, Spinner, Alert, Button } from 'react-bootstrap';
 
-
 /* ─── Panel de edición de stock ─────────────────────────────────── */
-const StockEditor = ({ bookId, currentStock, onUpdated }) => {
+const StockEditor = ({ bookId, currentStock, outOfStock, onUpdated }) => {
     const [stock,   setStock]   = useState(currentStock);
     const [saving,  setSaving]  = useState(false);
     const [success, setSuccess] = useState(false);
     const [error,   setError]   = useState(null);
 
-    // Sincroniza si el libro se recarga desde fuera
     useEffect(() => { setStock(currentStock); }, [currentStock]);
 
     const handleChange = (delta) => {
@@ -29,7 +27,7 @@ const StockEditor = ({ bookId, currentStock, onUpdated }) => {
                 countInStock: stock,
             });
             setSuccess(true);
-            onUpdated(data);           // actualiza el estado del padre (book)
+            onUpdated(data);
             setTimeout(() => setSuccess(false), 3000);
         } catch (err) {
             setError("No se pudo actualizar el stock.");
@@ -60,18 +58,16 @@ const StockEditor = ({ bookId, currentStock, onUpdated }) => {
                 >
                     −
                 </Button>
-
                 <span
                     className="fw-bold text-center"
                     style={{
                         minWidth: '40px',
                         fontSize: '1.2rem',
-                        color: stock <= 3 ? '#dc3545' : '#212529',
+                        color: stock === 0 ? '#6c757d' : stock == 0 ? '#dc3545' : '#212529',
                     }}
                 >
                     {stock}
                 </span>
-
                 <Button
                     variant="outline-secondary"
                     size="sm"
@@ -85,7 +81,7 @@ const StockEditor = ({ bookId, currentStock, onUpdated }) => {
 
             {/* Botón guardar */}
             <Button
-                variant={dirty ? "primary" : "secondary"}
+                variant={dirty ? (outOfStock && stock > 0 ? "success" : "primary") : "secondary"}
                 size="sm"
                 className="w-100"
                 onClick={handleSave}
@@ -93,7 +89,9 @@ const StockEditor = ({ bookId, currentStock, onUpdated }) => {
             >
                 {saving
                     ? <><Spinner animation="border" size="sm" className="me-1" /> Guardando…</>
-                    : "Guardar cambios"
+                    : outOfStock && stock > 0
+                        ? "✅ Reabastecer libro"
+                        : "Guardar cambios"
                 }
             </Button>
 
@@ -112,7 +110,6 @@ const StockEditor = ({ bookId, currentStock, onUpdated }) => {
     );
 };
 
-
 /* ─── Pantalla de detalle del libro ─────────────────────────────── */
 const BookScreen = () => {
     const [book,          setBook]          = useState({});
@@ -124,7 +121,6 @@ const BookScreen = () => {
         const fetchBook = async () => {
             const { data } = await api.get(`/api/books/${id}`);
             setBook(data);
-
             if (data.name) {
                 setReviewLoading(true);
                 try {
@@ -142,7 +138,6 @@ const BookScreen = () => {
         fetchBook();
     }, [id]);
 
-    // Callback: el StockEditor devuelve el libro actualizado desde el backend
     const handleStockUpdated = (updatedBook) => {
         setBook(updatedBook);
     };
@@ -157,8 +152,34 @@ const BookScreen = () => {
                 </Link>
             </div>
 
-            {/* ── Alerta de Poco Stock ──────────────────────────── */}
-            {book.lowStock && (
+            {/* ── Alerta Agotado — prioridad máxima ────────────── */}
+            {book.outOfStock && (
+                <Alert
+                    variant="danger"
+                    className="d-flex align-items-center gap-2 mb-4"
+                    style={{ borderLeft: '4px solid #dc3545' }}
+                >
+                    <span style={{ fontSize: '1.2rem' }}>🚫</span>
+                    <div>
+                        <strong>Libro agotado</strong>
+                        {book.outOfStockSince && (
+                            <span className="text-muted ms-2" style={{ fontSize: '0.85rem' }}>
+                                — Sin stock desde{' '}
+                                {new Date(book.outOfStockSince).toLocaleDateString('es-CO', {
+                                    year: 'numeric',
+                                    month: 'long',
+                                    day: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                })}
+                            </span>
+                        )}
+                    </div>
+                </Alert>
+            )}
+
+            {/* ── Alerta Poco Stock — solo si no está agotado ──── */}
+            {book.lowStock && !book.outOfStock && (
                 <Alert
                     variant="warning"
                     className="d-flex align-items-center gap-2 mb-4"
@@ -177,7 +198,16 @@ const BookScreen = () => {
             <Row>
                 {/* Portada */}
                 <Col md={4}>
-                    <Image src={book.image} alt={book.name} fluid />
+                    <Image
+                        src={book.image}
+                        alt={book.name}
+                        fluid
+                        style={{
+                            filter: book.outOfStock ? 'grayscale(50%)' : 'none',
+                            opacity: book.outOfStock ? 0.75 : 1,
+                            transition: 'filter 0.3s, opacity 0.3s',
+                        }}
+                    />
                 </Col>
 
                 {/* Info del libro */}
@@ -196,27 +226,37 @@ const BookScreen = () => {
                             <div className="d-flex align-items-center gap-2 flex-wrap">
                                 <span>
                                     Estado:{' '}
-                                    {book.countInStock > 0 ? 'Disponible' : 'No Disponible'}{' '}
+                                    {book.outOfStock
+                                        ? <span className="text-muted">Agotado</span>
+                                        : book.countInStock > 0
+                                            ? 'Disponible'
+                                            : 'No Disponible'
+                                    }{' '}
                                     ({book.countInStock}) uds
                                 </span>
-                                {book.lowStock && (
+                                {book.outOfStock && (
+                                    <Badge bg="dark" style={{ fontSize: '0.7rem' }}>
+                                        🚫 Agotado
+                                    </Badge>
+                                )}
+                                {book.lowStock && !book.outOfStock && (
                                     <Badge bg="danger" style={{ fontSize: '0.7rem' }}>
                                         ⚠ Poco stock
                                     </Badge>
                                 )}
                             </div>
                         </ListGroup.Item>
-
                         <ListGroup.Item>
                             <strong>Precio:</strong> {book.price}
                         </ListGroup.Item>
 
-                        {/* ── Editor de stock ───────────────────── */}
+                        {/* Editor de stock */}
                         {book.id && (
                             <ListGroup.Item className="px-0 pt-3">
                                 <StockEditor
                                     bookId={book.id}
                                     currentStock={book.countInStock ?? 0}
+                                    outOfStock={book.outOfStock ?? false}
                                     onUpdated={handleStockUpdated}
                                 />
                             </ListGroup.Item>
@@ -225,7 +265,7 @@ const BookScreen = () => {
                 </Col>
             </Row>
 
-            {/* Enriched data from reviews-service */}
+            {/* Información adicional desde reviews-service */}
             <Row className="mt-5">
                 <Col>
                     <h5 className="mb-3">Información adicional</h5>
@@ -250,7 +290,7 @@ const BookScreen = () => {
                             )}
                             {review.subjects?.length > 0 && (
                                 <ListGroup.Item>
-                                    <strong>Temas:</strong>{" "}
+                                    <strong>Temas:</strong>{' '}
                                     {review.subjects.map((s, i) => (
                                         <Badge bg="secondary" className="me-1" key={i}>{s}</Badge>
                                     ))}

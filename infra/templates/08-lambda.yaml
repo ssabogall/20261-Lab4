@@ -1,8 +1,9 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  MyBookStore — Stack 08: Lambda
-  detectarStockBajo: escucha DynamoDB Streams y actualiza lowStock.
-  Compatible con AWS Academy — usa LabRole directamente.
+  MyBookStore - Stack 08: Lambda
+  detectarStockBajo: DynamoDB Streams -> actualiza lowStock.
+  archivarLibrosAgotados: DynamoDB Streams -> marca outOfStock + outOfStockSince.
+  Compatible con AWS Academy - usa LabRole directamente.
 
 Parameters:
   ProjectName:
@@ -15,7 +16,7 @@ Parameters:
 
 Resources:
 
-  # ── Lambda: detectarStockBajo ─────────────────────────────
+  # ── Lambda 1: detectarStockBajo ───────────────────────────
   LambdaDetectarStockBajo:
     Type: AWS::Lambda::Function
     Properties:
@@ -25,41 +26,31 @@ Resources:
       Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
       Timeout: 15
       MemorySize: 128
-
       Environment:
         Variables:
           DYNAMO_TABLE: !ImportValue
             Fn::Sub: "${ProjectName}-BooksTableName"
           STOCK_THRESHOLD: !Sub "${StockThreshold}"
-
       Code:
         ZipFile: |
-          const {
-            DynamoDBClient,
-            UpdateItemCommand
-          } = require("@aws-sdk/client-dynamodb");
-
+          const { DynamoDBClient, UpdateItemCommand } = require("@aws-sdk/client-dynamodb");
           const dynamo = new DynamoDBClient({});
           const THRESHOLD = parseInt(process.env.STOCK_THRESHOLD || "3");
 
           exports.handler = async (event) => {
             for (const record of event.Records) {
-
               if (record.eventName !== "MODIFY") continue;
-
               const newImage = record.dynamodb?.NewImage;
               const oldImage = record.dynamodb?.OldImage;
-
               if (!newImage?.countInStock?.N || !newImage?.id?.S) continue;
 
               const bookId   = newImage.id.S;
               const stock    = parseInt(newImage.countInStock.N);
-              const lowStock = stock <= THRESHOLD;
-
-              // Guard anti-loop: si lowStock no cambio, no actualizar
+              const lowStock = stock > 0 && stock <= THRESHOLD;
               const oldLowStock = oldImage?.lowStock?.BOOL ?? null;
+
               if (oldLowStock === lowStock) {
-                console.log(`Libro ${bookId}: sin cambio en lowStock (${lowStock}), skipping`);
+                console.log(`Libro ${bookId}: lowStock sin cambio, skipping`);
                 continue;
               }
 
@@ -71,21 +62,23 @@ Resources:
                   ExpressionAttributeValues: { ":val": { BOOL: lowStock } },
                   ConditionExpression: "attribute_not_exists(lowStock) OR lowStock <> :val"
                 }));
-                console.log(`OK Libro ${bookId} | stock=${stock} | lowStock=${lowStock}`);
+                console.log(`OK ${bookId} | stock=${stock} | lowStock=${lowStock}`);
               } catch (err) {
                 if (err.name === "ConditionalCheckFailedException") {
                   console.log(`Libro ${bookId}: ya tenia lowStock=${lowStock}`);
                 } else {
-                  console.error(`Error libro ${bookId}:`, err.message);
+                  console.error(`Error ${bookId}:`, err.message);
                   throw err;
                 }
               }
             }
             return { statusCode: 200 };
           };
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
 
-  # ── Trigger: DynamoDB Stream → Lambda ────────────────────
-  LambdaDynamoTrigger:
+  TriggerStockBajo:
     Type: AWS::Lambda::EventSourceMapping
     Properties:
       FunctionName: !GetAtt LambdaDetectarStockBajo.Arn
@@ -98,8 +91,105 @@ Resources:
         Filters:
           - Pattern: '{"eventName": ["MODIFY"]}'
 
+  # ── Lambda 2: archivarLibrosAgotados ─────────────────────
+  LambdaArchivarLibros:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-archivarLibrosAgotados"
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Timeout: 15
+      MemorySize: 128
+      Environment:
+        Variables:
+          DYNAMO_TABLE: !ImportValue
+            Fn::Sub: "${ProjectName}-BooksTableName"
+      Code:
+        ZipFile: |
+          const { DynamoDBClient, UpdateItemCommand } = require("@aws-sdk/client-dynamodb");
+          const dynamo = new DynamoDBClient({});
+
+          exports.handler = async (event) => {
+            for (const record of event.Records) {
+              if (record.eventName !== "MODIFY") continue;
+              const newImage = record.dynamodb?.NewImage;
+              const oldImage = record.dynamodb?.OldImage;
+              if (!newImage?.countInStock?.N || !newImage?.id?.S) continue;
+
+              const bookId          = newImage.id.S;
+              const stock           = parseInt(newImage.countInStock.N);
+              const isNowOutOfStock = stock === 0;
+              const wasOutOfStock   = oldImage?.outOfStock?.BOOL ?? false;
+
+              // Anti-loop: si outOfStock no cambio, ignorar
+              if (wasOutOfStock === isNowOutOfStock) {
+                console.log(`Libro ${bookId}: outOfStock sin cambio, skipping`);
+                continue;
+              }
+
+              try {
+                if (isNowOutOfStock) {
+                  // Agotado: marcar con fecha
+                  await dynamo.send(new UpdateItemCommand({
+                    TableName: process.env.DYNAMO_TABLE,
+                    Key: { id: { S: bookId } },
+                    UpdateExpression: "SET outOfStock = :t, outOfStockSince = :d",
+                    ExpressionAttributeValues: {
+                      ":t": { BOOL: true },
+                      ":d": { S: new Date().toISOString() },
+                    },
+                    ConditionExpression: "attribute_not_exists(outOfStock) OR outOfStock <> :t"
+                  }));
+                  console.log(`ARCHIVADO ${bookId} | agotado desde ${new Date().toISOString()}`);
+                } else {
+                  // Reabastecido: limpiar campos
+                  await dynamo.send(new UpdateItemCommand({
+                    TableName: process.env.DYNAMO_TABLE,
+                    Key: { id: { S: bookId } },
+                    UpdateExpression: "SET outOfStock = :f REMOVE outOfStockSince",
+                    ExpressionAttributeValues: {
+                      ":f": { BOOL: false },
+                    },
+                    ConditionExpression: "attribute_not_exists(outOfStock) OR outOfStock <> :f"
+                  }));
+                  console.log(`REABASTECIDO ${bookId} | outOfStock limpiado`);
+                }
+              } catch (err) {
+                if (err.name === "ConditionalCheckFailedException") {
+                  console.log(`Libro ${bookId}: condicion ya satisfecha, ignorado`);
+                } else {
+                  console.error(`Error ${bookId}:`, err.message);
+                  throw err;
+                }
+              }
+            }
+            return { statusCode: 200 };
+          };
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  TriggerArchivar:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      FunctionName: !GetAtt LambdaArchivarLibros.Arn
+      EventSourceArn: !ImportValue
+        Fn::Sub: "${ProjectName}-BooksTableStreamArn"
+      StartingPosition: LATEST
+      BatchSize: 10
+      BisectBatchOnFunctionError: true
+      FilterCriteria:
+        Filters:
+          - Pattern: '{"eventName": ["MODIFY"]}'
+
 Outputs:
-  LambdaArn:
+  LambdaDetectarStockBajoArn:
     Value: !GetAtt LambdaDetectarStockBajo.Arn
     Export:
       Name: !Sub "${ProjectName}-LambdaDetectarStockBajoArn"
+
+  LambdaArchivarLibrosArn:
+    Value: !GetAtt LambdaArchivarLibros.Arn
+    Export:
+      Name: !Sub "${ProjectName}-LambdaArchivarLibrosArn"
