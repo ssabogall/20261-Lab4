@@ -2,7 +2,6 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   MyBookStore - Stack 06: S3 Buckets
   Bucket de objetos (portadas de libros) y bucket frontend (React build).
-  OAC para acceso CloudFront a S3 sin credenciales publicas.
 
 Parameters:
   ProjectName:
@@ -48,31 +47,6 @@ Resources:
         - Key: Name
           Value: !Sub "${ProjectName}-frontend"
 
-  # OAC para CloudFront - acceso seguro a S3 sin hacer bucket publico
-  CloudFrontOAC:
-    Type: AWS::CloudFront::OriginAccessControl
-    Properties:
-      OriginAccessControlConfig:
-        Name: !Sub "${ProjectName}-oac"
-        OriginAccessControlOriginType: s3
-        SigningBehavior: always
-        SigningProtocol: sigv4
-
-  # Politica bucket frontend - solo CloudFront con OAC puede leer
-  FrontendBucketPolicy:
-    Type: AWS::S3::BucketPolicy
-    Properties:
-      Bucket: !Ref FrontendBucket
-      PolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Sid: AllowCloudFrontOAC
-            Effect: Allow
-            Principal:
-              Service: cloudfront.amazonaws.com
-            Action: s3:GetObject
-            Resource: !Sub "${FrontendBucket.Arn}/*"
-
 Outputs:
   ObjectsBucketName:
     Value: !Ref ObjectsBucket
@@ -93,8 +67,3 @@ Outputs:
     Value: !GetAtt FrontendBucket.Arn
     Export:
       Name: !Sub "${ProjectName}-FrontendBucketArn"
-
-  CloudFrontOACId:
-    Value: !GetAtt CloudFrontOAC.Id
-    Export:
-      Name: !Sub "${ProjectName}-CloudFrontOACId"

@@ -81,7 +81,7 @@ Resources:
       GroupId: !Ref SGEks
       IpProtocol: "-1"
       SourceSecurityGroupId: !Ref SGEks
-      Description: Comunicación interna EKS
+      Description: Comunicacion interna EKS
 
 Outputs:
   SGAlbId:
